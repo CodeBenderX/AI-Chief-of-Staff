@@ -44,7 +44,7 @@ Without a model, the app runs on a built-in offline mock so you can try the scre
 2. Open the **Developer** tab and turn on **Start server** (it runs at `http://localhost:1234`). Copy the model's identifier shown there.
 3. In the app, go to **Settings → AI models**:
    - In Providers, tick **On** for `lmstudio`.
-   - In Model profiles, for **Local (Ollama)** and **Planner (local)**: set Provider to `lmstudio` and Model to the identifier you copied.
+   - In Model profiles, for **Local (Ollama)** and **Planner (local)**: set Provider to `lmstudio`, Model to the identifier you copied, and **Context** to the Context Length you loaded the model with in LM Studio (32768 recommended; set it in LM Studio's model Load settings).
    - Click **Save model settings**. The `lmstudio` row should show "ready".
 
 **Ollama**: run `ollama pull llama3.1:8b`; the default profiles already point at Ollama, so nothing else is needed (change the model name in Settings if you pulled a different one).
