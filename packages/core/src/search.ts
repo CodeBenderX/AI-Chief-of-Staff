@@ -26,7 +26,9 @@ async function readJson(res: Response, service: string): Promise<any> {
   const text = await res.text();
   if (!res.ok) {
     const hint =
-      res.status === 401 || res.status === 403
+      service === "SearXNG" && res.status === 403
+        ? ' (JSON output is turned off: add "json" under search → formats in SearXNG\'s settings.yml, then restart SearXNG)'
+        : res.status === 401 || res.status === 403
         ? " (check the API key in Settings)"
         : res.status === 429
           ? " (rate limit or monthly allowance reached)"

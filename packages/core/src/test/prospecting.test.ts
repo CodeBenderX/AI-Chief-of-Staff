@@ -133,5 +133,10 @@ describe("search providers", () => {
     const port = await serve((req) => (req.url!.includes("format=json") ? { body: "<html>searx</html>" } : { status: 401, body: "invalid key" }));
     await expect(new TavilySearch("bad", `http://127.0.0.1:${port}`).search("x")).rejects.toThrow(/401.*check the API key/);
     await expect(new SearxngSearch(`http://127.0.0.1:${port}`).search("x")).rejects.toThrow(/enable "json"/);
+    // SearXNG answers 403 when JSON output is disabled (no key involved)
+    const forbidden = await serve(() => ({ status: 403, body: "<title>403 Forbidden</title>" }));
+    const err = await new SearxngSearch(`http://127.0.0.1:${forbidden}`).search("x").catch((e: Error) => e.message);
+    expect(err).toMatch(/JSON output is turned off/);
+    expect(err).not.toMatch(/API key/);
   });
 });
