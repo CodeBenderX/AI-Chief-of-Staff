@@ -74,6 +74,31 @@ describe("Approvals", () => {
     expect(c.outbox.sent).toHaveLength(1);
   });
 
+  it("re-binds an edited approval to the CEO's version only", async () => {
+    const c = await setup(() => ({ text: "" }));
+    const sales = (await c.store.getAgent("sales"))!;
+    const t = task();
+    t.agentId = "sales";
+    await c.store.createTask(t);
+    const ctrl = new AbortController();
+    const agentDraft = { to: "wrong@client.test", subject: "Hi", body: "Draft from the agent" };
+    const first = await c.executor.run({ agent: sales, task: t, toolId: "email.send", input: agentDraft, signal: ctrl.signal });
+    const approvalId = first.status === "needs_approval" ? first.approval.id : "";
+
+    const ceoVersion = { to: "right@client.test", subject: "Hello", body: "Edited by the CEO" };
+    await expect(c.approvals.decide(approvalId, "rejected", "ceo", undefined, ceoVersion)).rejects.toThrow(/only be approved/);
+    const decided = await c.approvals.decide(approvalId, "approved", "ceo", undefined, ceoVersion);
+    expect(decided).toMatchObject({ input: ceoVersion, originalInput: agentDraft, editedBy: "ceo" });
+
+    // The agent's original can no longer run under this approval...
+    expect((await c.executor.run({ agent: sales, task: t, toolId: "email.send", input: agentDraft, signal: ctrl.signal, approvalId })).status).toBe("denied");
+    // ...only the CEO's version, once.
+    expect((await c.executor.run({ agent: sales, task: t, toolId: "email.send", input: ceoVersion, signal: ctrl.signal, approvalId })).status).toBe("ok");
+    expect(c.outbox.sent).toEqual([expect.objectContaining({ to: "right@client.test", body: "Edited by the CEO" })]);
+    const audit = c.store.audit.find((x) => x.action === "approval.approved")!;
+    expect(audit.detail).toMatchObject({ edited: true, original: agentDraft, approvedVersion: ceoVersion });
+  });
+
   it("cannot be decided twice", async () => {
     const c = await setup(() => ({ text: "" }));
     const a = await c.approvals.request({ taskId: "t", rootTaskId: "t", agentId: "sales", toolId: "email.send", input: {}, actions: ["external_communication"], baseRisk: "medium", estimatedCostUsd: 0, justification: "x" });

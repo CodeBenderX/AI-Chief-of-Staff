@@ -380,11 +380,52 @@ export async function buildApp(cfg: AppConfig) {
     return list.map((a) => ({ ...a, taskTitle: tasks.get(a.taskId), tool: company.tools.catalog().find((t) => t.id === a.toolId)?.name }));
   });
 
+  /**
+   * Fields the CEO may edit before approving. Edited versions go through the same
+   * validation and checks as the agent's (valid address, do-not-contact list,
+   * outreach footer), and the email allowlist and daily cap still apply at send.
+   */
+  const EDITABLE_FIELDS: Record<string, string[]> = {
+    "email.send": ["to", "subject", "body"],
+    "content.publish": ["title", "body"],
+  };
+
   app.post("/api/approvals/:id/decision", can("approvals:decide"), async (req) => {
     const { id } = req.params as { id: string };
-    const body = z.object({ decision: z.enum(["approved", "rejected", "changes_requested"]), note: z.string().max(2000).optional() }).parse(req.body);
+    const body = z
+      .object({
+        decision: z.enum(["approved", "rejected", "changes_requested"]),
+        note: z.string().max(2000).optional(),
+        edit: z.record(z.string(), z.string().max(100_000)).optional(),
+      })
+      .parse(req.body);
     if (body.decision === "changes_requested" && !body.note) throw Object.assign(new Error("say what should change"), { statusCode: 400 });
-    const a = await company.approvals.decide(id, body.decision, me(req).id, body.note);
+
+    let editedInput: unknown;
+    if (body.edit) {
+      const bad = (msg: string) => Object.assign(new Error(msg), { statusCode: 400 });
+      if (body.decision !== "approved") throw bad("edits can only be approved");
+      const approval = await store.getApproval(id);
+      if (!approval) throw Object.assign(new Error("approval not found"), { statusCode: 404 });
+      const allowed = EDITABLE_FIELDS[approval.toolId];
+      if (!allowed) throw bad("this kind of action can't be edited; approve, reject or request changes");
+      const notAllowed = Object.keys(body.edit).filter((k) => !allowed.includes(k));
+      const list = allowed.length > 1 ? `${allowed.slice(0, -1).join(", ")} and ${allowed.at(-1)}` : allowed[0];
+      if (notAllowed.length) throw bad(`only ${list} can be edited (not ${notAllowed.join(", ")})`);
+      if (approval.status !== "pending") throw Object.assign(new Error(`approval is ${approval.status}, not pending`), { statusCode: 409 });
+      const candidate = { ...(approval.input as Record<string, unknown>), ...body.edit };
+      if (typeof candidate.to === "string") candidate.to = candidate.to.trim();
+      const tool = company.tools.get(approval.toolId)!;
+      const parsed = tool.input.safeParse(candidate);
+      if (!parsed.success) throw bad(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+      // Same rules as for the agent: required outreach footer, do-not-contact list.
+      const refusal = await leads.preflight({ toolId: approval.toolId, input: parsed.data });
+      if (refusal) throw bad(`Your edit can't be approved: ${refusal.replace(/ Add it and call email.send again:/, " It must end with:")}`);
+      editedInput = parsed.data;
+    }
+    const a = await company.approvals.decide(id, body.decision, me(req).id, body.note, editedInput).catch((e: Error) => {
+      throw Object.assign(e, { statusCode: /not found/.test(e.message) ? 404 : 409 });
+    });
     await company.orchestrator.resume(a.taskId);
     return a;
   });

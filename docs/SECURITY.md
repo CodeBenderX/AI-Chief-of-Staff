@@ -26,6 +26,7 @@ The CEO holds final authority. The rules below are enforced in code and in the d
 - Bound to `sha256(tool id + canonical JSON input)`. A different recipient, body, amount, etc. needs a new approval.
 - Single use: execution consumes the approval with a compare-and-set in the database, so concurrent replays fail.
 - Pending approvals expire after 72 hours and are never treated as approval.
+- The CEO can edit an email's recipient, subject or body (or a post's title and content) before approving. The edited version is validated and checked exactly like an agent's draft (schema, do-not-contact list, outreach footer), the approval is re-bound to the edited version's hash so only that version can run, and the audit log keeps the agent's original next to the approved version. Other action types can't be edited, only approved, rejected or sent back with a note.
 
 ## Email
 

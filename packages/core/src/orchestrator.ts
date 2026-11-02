@@ -542,9 +542,11 @@ export class Orchestrator {
       }
       let content: string;
       if (approval.status === "approved") {
-        const r = await this.d.executor.run({ agent, task, toolId: approval.toolId, input: pending.input, signal, approvalId: approval.id, services: this.servicesFor(task) });
+        // Run exactly what the CEO approved, which may be their edited version.
+        const r = await this.d.executor.run({ agent, task, toolId: approval.toolId, input: approval.input, signal, approvalId: approval.id, services: this.servicesFor(task) });
         await this.countTool(task);
         content = r.status === "ok" ? fenceUntrusted(`tool:${approval.toolId}`, JSON.stringify(r.output)) : `Tool ${r.status}: ${"reason" in r ? r.reason : "error" in r ? r.error : ""}`;
+        if (approval.editedBy) content = `The CEO edited your proposed action before approving it; this version ran:\n${JSON.stringify(approval.input)}\n\n${content}`;
         await this.event(task, "tool.executed", { toolId: approval.toolId, approvalId: approval.id, status: r.status });
       } else {
         content = `CEO decision on this action: ${approval.status.toUpperCase()}${approval.decisionNote ? ` — note: ${approval.decisionNote}` : ""}. Do not retry the same action; adapt or report back.`;

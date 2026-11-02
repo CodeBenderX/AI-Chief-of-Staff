@@ -79,7 +79,7 @@ export interface Task {
 }
 export interface Approval {
   id: string; taskId: string; rootTaskId: string; agentId: string; toolId: string; tool?: string; input: unknown; actions: string[]; risk: string; riskSummary: string;
-  estimatedCostUsd: number; justification: string; status: string; decidedBy: string | null; decisionNote: string | null; createdAt: string; decidedAt: string | null; expiresAt: string; taskTitle?: string;
+  estimatedCostUsd: number; justification: string; status: string; decidedBy: string | null; editedBy?: string | null; originalInput?: unknown; decisionNote: string | null; createdAt: string; decidedAt: string | null; expiresAt: string; taskTitle?: string;
 }
 export interface TaskEvent { id: string; taskId: string; rootId: string; type: string; agentId: string | null; data: Record<string, unknown>; at: string }
 export interface MemoryItem { id: string; key: string; scope: string; title: string; content: string; tags: string[]; source: string; sourceType: string; verified: boolean; version: number; status: string; createdBy: string; createdAt: string }

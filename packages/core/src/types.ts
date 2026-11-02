@@ -203,6 +203,9 @@ export interface ApprovalRequest {
   justification: string;
   status: ApprovalStatus;
   decidedBy: string | null;
+  /** Set when the CEO edited the action before approving it: what the agent originally proposed. */
+  originalInput?: unknown;
+  editedBy?: string | null;
   decisionNote: string | null;
   createdAt: string;
   decidedAt: string | null;

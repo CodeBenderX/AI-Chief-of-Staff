@@ -64,7 +64,7 @@ The **Leads** page finds local businesses whose websites need work, checks each 
 1. **Choose a search service** in **Settings → Web search**. Tavily's free plan (1,000 searches a month, no credit card) is plenty: a lead search uses about 2–5. Sign up at tavily.com, paste the API key, save, and click **Run a test search**. Brave Search and self-hosted SearXNG also work. Set **Most searches per month** below your plan's free allowance and the app stops before you'd be charged.
 2. **Fill in Settings → Outreach**: your name, business name, how to reach you, and what you offer. These become the footer on every outreach email, with an opt-out sentence. Anti-spam laws (Canada's CASL, the US CAN-SPAM Act) require identifying yourself and offering a way to opt out, so outreach emails without the footer are refused.
 3. On **Leads**, enter a type of business and an area (e.g. "plumbers", "Burnaby, BC") and click **Find leads**. It skips directories like Yelp and Facebook, checks each website (HTTPS, mobile-friendly, outdated, broken links, slow, search basics) and keeps the ones with real problems, along with any contact email the business publishes on its own site and the page it was found on.
-4. Open a lead and click **Draft outreach email**. The Sales agent writes a short, personalized email that mentions only problems the check actually found. You review the exact message in **Approvals**; nothing is sent until you approve it. Once sent, the lead is marked **Contacted**.
+4. Open a lead and click **Draft outreach email**. The Sales agent writes a short, personalized email that mentions only problems the check actually found. You review the exact message in **Approvals**, and can click **Edit before approving** to change the recipient, subject or message yourself. Nothing is sent until you approve it. Once sent, the lead is marked **Contacted**.
 5. If anyone asks not to be contacted, click **Do not contact** on the lead (or add them in Settings → Outreach). They are never emailed again, even if an email was already approved.
 
 Not legal advice: you're responsible for following the anti-spam rules where you and your recipients are. In Canada, emailing an address a business publishes on its website is generally allowed only when the message relates to their business and the site doesn't say they don't want unsolicited messages.
@@ -112,7 +112,7 @@ docs/           ARCHITECTURE.md, SECURITY.md
 
 ## What works today
 
-Verified by the test suite (61 tests) and by running the full stack against PostgreSQL 16.
+Verified by the test suite (65 tests) and by running the full stack against PostgreSQL 16.
 
 - **Orchestration.** The Chief of Staff turns an objective into a dependency graph of department subtasks; plans are validated (known agents, no cycles, size limits). Independent work runs in parallel, dependent work waits for inputs, results are synthesized into a report to the CEO. Retries, escalation, cancellation, and recovery after restart.
 - **Execution limits on every task tree:** delegation depth, subtask count, model calls, tool calls, steps per task, tokens, spend, wall-clock time, identical-call loop guard, repeated-failure guard. Recursive delegation and dependency deadlocks are refused.

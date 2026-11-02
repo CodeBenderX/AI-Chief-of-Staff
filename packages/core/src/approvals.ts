@@ -85,18 +85,26 @@ export class ApprovalService {
   }
 
   /** CEO decision. Caller (API) must have verified the user holds the `approvals:decide` permission. */
-  async decide(id: string, decision: Decision, userId: string, note?: string): Promise<ApprovalRequest> {
+  /**
+   * @param editedInput the CEO's edited version of the action (already validated
+   * by the caller). Only allowed with "approved": the approval is re-bound to the
+   * edited input, so exactly that version can run.
+   */
+  async decide(id: string, decision: Decision, userId: string, note?: string, editedInput?: unknown): Promise<ApprovalRequest> {
+    if (editedInput !== undefined && decision !== "approved") throw new Error("an edited action can only be approved");
     const current = await this.store.getApproval(id);
     if (!current) throw new Error("approval not found");
     if (current.status === "pending" && Date.parse(current.expiresAt) < Date.now()) {
       await this.store.transitionApproval(id, "pending", { status: "expired" });
       throw new Error("approval request has expired");
     }
+    const edited = editedInput !== undefined && actionHash(current.toolId, editedInput) !== current.actionHash;
     const updated = await this.store.transitionApproval(id, "pending", {
       status: decision,
       decidedBy: userId,
       decisionNote: note ?? null,
       decidedAt: nowIso(),
+      ...(edited ? { input: editedInput, actionHash: actionHash(current.toolId, editedInput), originalInput: current.input, editedBy: userId } : {}),
     });
     if (!updated) throw new Error(`approval is ${current.status}, not pending`);
     await this.audit.write({
@@ -105,7 +113,9 @@ export class ApprovalService {
       action: `approval.${decision}`,
       target: id,
       outcome: "ok",
-      detail: { toolId: current.toolId, actionHash: current.actionHash, note },
+      detail: edited
+        ? { toolId: current.toolId, note, edited: true, original: current.input, approvedVersion: editedInput }
+        : { toolId: current.toolId, actionHash: current.actionHash, note },
     });
     return updated;
   }
