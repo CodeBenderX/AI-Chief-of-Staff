@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: aicos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: aicos
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aicos"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://aicos:${POSTGRES_PASSWORD}@db:5432/aicos
+    # Lets the container reach Ollama / LM Studio on your machine: in Settings, set the
+    # provider address to http://host.docker.internal:11434/v1
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["127.0.0.1:8787:8787"]
+
+volumes:
+  pgdata:

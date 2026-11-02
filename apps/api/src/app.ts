@@ -453,8 +453,12 @@ export async function buildApp(cfg: AppConfig) {
 
   // ---------------- dashboard ----------------
   if (cfg.staticDir && existsSync(cfg.staticDir)) {
-    await app.register(fastifyStatic, { root: cfg.staticDir, wildcard: false });
-    app.setNotFoundHandler((req, reply) => (req.url.startsWith("/api/") ? reply.code(404).send({ error: "not found" }) : reply.sendFile("index.html")));
+    await app.register(fastifyStatic, { root: cfg.staticDir, index: false });
+    // Client-side routes get the app shell; missing API routes and assets are real 404s.
+    app.setNotFoundHandler((req, reply) =>
+      req.method !== "GET" || req.url.startsWith("/api/") || /\.[a-z0-9]+(\?|$)/i.test(req.url) ? reply.code(404).send({ error: "not found" }) : reply.sendFile("index.html"),
+    );
+    app.get("/", (_req, reply) => reply.sendFile("index.html"));
   }
 
   return { app: app as FastifyInstance, company, store, settings, secrets, outbox, documents };

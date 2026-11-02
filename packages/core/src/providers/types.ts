@@ -75,5 +75,5 @@ export function classifyError(e: unknown): ProviderError {
   if (err?.name === "AbortError" || msg === "aborted") return new ProviderError("aborted", false);
   if (status !== undefined) return new ProviderError(msg, status === 408 || status === 409 || status === 429 || status >= 500, status);
   // network-level failure (ECONNRESET, fetch failed ...)
-  return new ProviderError(msg, /ECONN|ETIMEDOUT|fetch failed|socket|network|timed out/i.test(msg + (err?.code ?? "")));
+  return new ProviderError(msg, /ECONN|ETIMEDOUT|fetch failed|socket|network|timed out|connection error/i.test(msg + (err?.code ?? "")));
 }
