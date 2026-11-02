@@ -222,6 +222,26 @@ export class Orchestrator {
     if (task.id !== task.rootId) this.drive(task.rootId).catch(() => {});
   }
 
+  /**
+   * After a restart: tasks that were mid-run continue from their saved
+   * transcript; trees waiting on approvals stay paused.
+   */
+  async recover(): Promise<number> {
+    const live = (await this.d.store.listTasks({ limit: 10_000 })).filter((t) => t.status === "running" || t.status === "pending");
+    const roots = new Set<string>();
+    for (const t of live) {
+      if (t.parentId && t.parentId !== t.rootId) {
+        // Ad-hoc delegations are re-requested by their parent when it re-runs.
+        await this.finish(t, "failed", null, "interrupted by restart");
+        continue;
+      }
+      if (t.status === "running") await this.d.store.updateTask(t.id, { status: "pending" });
+      roots.add(t.rootId);
+    }
+    for (const r of roots) this.drive(r).catch(() => {});
+    return roots.size;
+  }
+
   async waitForIdle(rootId: string) {
     while (this.driving.has(rootId)) await this.driving.get(rootId);
   }
