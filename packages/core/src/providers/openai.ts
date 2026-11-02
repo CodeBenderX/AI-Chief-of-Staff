@@ -19,34 +19,59 @@ export class OpenAIProvider implements ModelProvider {
 
   async complete(req: ModelRequest): Promise<ModelResponse> {
     try {
-      const res = await this.client.chat.completions.create(
-        {
-          model: req.model,
-          max_tokens: req.maxOutputTokens,
-          temperature: req.temperature,
-          messages: toOpenAIMessages(req.system, req.messages),
-          tools: req.tools?.length
-            ? req.tools.map((t) => ({ type: "function" as const, function: { name: t.name, description: t.description, parameters: t.inputSchema } }))
-            : undefined,
-          response_format: req.json && !req.tools?.length ? { type: "json_object" } : undefined,
-        },
-        { signal: req.signal },
-      );
-      const choice = res.choices[0];
-      const msg = choice?.message;
-      const toolCalls = (msg?.tool_calls ?? [])
-        .filter((c) => c.type === "function")
-        .map((c) => ({ id: c.id, name: c.function.name, input: safeJson(c.function.arguments) }));
-      return {
-        text: msg?.content ?? "",
-        toolCalls,
-        usage: { inputTokens: res.usage?.prompt_tokens ?? 0, outputTokens: res.usage?.completion_tokens ?? 0 },
-        stopReason: choice?.finish_reason ?? "unknown",
-      };
+      return await this.request(req, responseFormat(req));
     } catch (e) {
+      // Some OpenAI-compatible servers accept only certain response_format types
+      // (LM Studio: json_schema or text). Retry once without it rather than fail.
+      const err = e as { status?: number; message?: string };
+      if (err?.status === 400 && /response_format/i.test(err.message ?? "") && responseFormat(req)) {
+        try {
+          return await this.request(req, undefined);
+        } catch (e2) {
+          throw classifyError(e2);
+        }
+      }
       throw classifyError(e);
     }
   }
+
+  private async request(req: ModelRequest, response_format: OpenAI.ChatCompletionCreateParams["response_format"]): Promise<ModelResponse> {
+    const res = await this.client.chat.completions.create(
+      {
+        model: req.model,
+        max_tokens: req.maxOutputTokens,
+        temperature: req.temperature,
+        messages: toOpenAIMessages(req.system, req.messages),
+        tools: req.tools?.length
+          ? req.tools.map((t) => ({ type: "function" as const, function: { name: t.name, description: t.description, parameters: t.inputSchema } }))
+          : undefined,
+        response_format,
+      },
+      { signal: req.signal },
+    );
+    const choice = res.choices[0];
+    const msg = choice?.message;
+    const toolCalls = (msg?.tool_calls ?? [])
+      .filter((c) => c.type === "function")
+      .map((c) => ({ id: c.id, name: c.function.name, input: safeJson(c.function.arguments) }));
+    return {
+      text: msg?.content ?? "",
+      toolCalls,
+      usage: { inputTokens: res.usage?.prompt_tokens ?? 0, outputTokens: res.usage?.completion_tokens ?? 0 },
+      stopReason: choice?.finish_reason ?? "unknown",
+    };
+  }
+}
+
+/** Prefer a schema (widely supported); bare JSON mode only when no schema is given. */
+export function responseFormat(req: ModelRequest): OpenAI.ChatCompletionCreateParams["response_format"] {
+  if (req.tools?.length) return undefined;
+  if (req.jsonSchema) {
+    const { $schema: _drop, ...schema } = req.jsonSchema.schema;
+    return { type: "json_schema", json_schema: { name: req.jsonSchema.name, schema, strict: false } };
+  }
+  if (req.json) return { type: "json_object" };
+  return undefined;
 }
 
 function safeJson(s: string): unknown {

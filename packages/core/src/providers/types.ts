@@ -15,6 +15,12 @@ export interface ModelRequest {
   temperature?: number;
   /** Ask for a JSON object reply (providers that support it). */
   json?: boolean;
+  /**
+   * JSON Schema the reply must match. Sent as structured output where the
+   * provider supports it (OpenAI, LM Studio, Ollama), which also keeps small
+   * local models on-format.
+   */
+  jsonSchema?: { name: string; schema: Record<string, unknown> };
   signal?: AbortSignal;
 }
 

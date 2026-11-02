@@ -39,6 +39,8 @@ const PlanSchema = z.object({
     .min(1),
 });
 export type Plan = z.infer<typeof PlanSchema>;
+/** The plan's shape as JSON Schema, sent to models that support structured output. */
+export const PLAN_JSON_SCHEMA = { name: "plan", schema: z.toJSONSchema(PlanSchema, { io: "input" }) as Record<string, unknown> };
 
 interface Budget {
   modelCalls: number;
@@ -404,7 +406,7 @@ export class Orchestrator {
       },
     ];
     for (let attempt = 0; attempt < 2; attempt++) {
-      const res = await this.callModel(root, cos, { system: cos.systemPrompt, messages, json: true }, signal);
+      const res = await this.callModel(root, cos, { system: cos.systemPrompt, messages, json: true, jsonSchema: PLAN_JSON_SCHEMA }, signal);
       try {
         const parsed = PlanSchema.safeParse(extractJson(res.text));
         if (!parsed.success) throw new Error(z.prettifyError(parsed.error));
@@ -704,7 +706,7 @@ export class Orchestrator {
     b.toolCalls++;
   }
 
-  private async callModel(task: TaskRecord, agent: AgentDefinition, req: { system: string; messages: ChatMessage[]; tools?: { name: string; description: string; inputSchema: Record<string, unknown> }[]; json?: boolean }, signal: AbortSignal) {
+  private async callModel(task: TaskRecord, agent: AgentDefinition, req: { system: string; messages: ChatMessage[]; tools?: { name: string; description: string; inputSchema: Record<string, unknown> }[]; json?: boolean; jsonSchema?: { name: string; schema: Record<string, unknown> } }, signal: AbortSignal) {
     const root = (await this.d.store.getTask(task.rootId))!;
     const b = await this.budget(root);
     await this.checkBudget(task, b, estimateTokens(req.system + req.messages.map((m) => m.content).join("")));
