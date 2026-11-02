@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import pg from "pg";
 
 /** Minimal query port so production (PostgreSQL) and tests (PGlite) share one code path. */
@@ -22,6 +24,8 @@ export class PgDb implements Db {
 
 export async function createPglite(dataDir?: string): Promise<Db> {
   const { PGlite } = await import("@electric-sql/pglite");
+  // PGlite creates its own folder but not missing parents (e.g. ./data on a fresh clone).
+  if (dataDir) mkdirSync(dirname(dataDir), { recursive: true });
   const db = new PGlite(dataDir);
   return {
     async query<T>(sql: string, params: unknown[] = []) {

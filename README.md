@@ -4,31 +4,58 @@ A platform for running a company with an AI workforce and a human CEO. You brief
 
 Status: **milestone 1, working core slice.** See [What works today](#what-works-today) and [Not built yet](#not-built-yet) for an exact account.
 
-## Quick start (local)
+## Run it on your computer
 
-Requirements: Node 22+, pnpm 10+. PostgreSQL 16 is recommended; without it the app uses an embedded Postgres (PGlite) in `./data`.
+Works on Windows, macOS and Linux. No database to install: data is kept in the `data` folder.
+
+**You need:** [Node.js 22 LTS](https://nodejs.org) or newer, and [Git](https://git-scm.com). Check with `node -v` (must print v20.12 or higher).
 
 ```bash
+# 1. Install pnpm (once per computer)
+npm install -g pnpm
+
+# 2. Get the code
+git clone https://github.com/CodeBenderX/AI-Chief-of-Staff.git
+cd AI-Chief-of-Staff
+
+# 3. Install and set up (creates .env with secret keys, then builds everything)
 pnpm install
-cp .env.example .env            # set JWT_SECRET and MASTER_KEY (commands are in the file)
-pnpm --filter @aicos/core build
-pnpm --filter @aicos/web build
-set -a; . ./.env; set +a
-pnpm dev:api                    # http://127.0.0.1:8787, serves the dashboard too
+pnpm run bootstrap
+
+# 4. Start it
+pnpm start
 ```
 
-Open http://127.0.0.1:8787 and create the CEO account (first run only). For UI development, run `pnpm dev:web` too and use http://localhost:5173 (it proxies `/api`).
+Open **http://localhost:8787** and create your CEO account. Stop the app with `Ctrl+C`; run `pnpm start` again to restart. Your data is kept.
 
-### Using your local models (Ollama / LM Studio)
+After pulling new code (`git pull`), run `pnpm install` and `pnpm run build` before `pnpm start`.
 
-The default model profile points at Ollama on `http://localhost:11434/v1` with `llama3.1:8b`.
+**If something goes wrong**
+- `pnpm` is not recognized: close and reopen the terminal after step 1. On Windows, if PowerShell says scripts are disabled, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or use Command Prompt.
+- Port 8787 is in use: change `PORT` in `.env`.
+- Forgot the CEO password during local testing: stop the app, delete the `data` folder (this erases everything) and start again.
 
-1. `ollama pull llama3.1:8b` (or any model with tool calling) and make sure Ollama is running.
-2. In **Settings → AI models**, set the model name on the `default` and `planner` profiles to the model you pulled. For LM Studio, enable the `lmstudio` provider (`http://localhost:1234/v1`) and point profiles at it.
+### Connect a local model (LM Studio or Ollama)
 
-If no model is reachable, every profile falls back to `offline`, a deterministic mock, so the product still works end to end and says so in its output. Small local models follow the JSON planning format less reliably than large hosted models; invalid plans are rejected and retried, then the Chief of Staff handles the objective directly.
+Without a model, the app runs on a built-in offline mock so you can try the screens; its answers are placeholders.
 
-To use Claude or OpenAI, add `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` in **Settings → API keys** and switch agent profiles to `claude` or `gpt`. Check the per-token prices in Settings against the provider's current price list; they drive cost tracking and budgets.
+**LM Studio**
+1. In LM Studio, download a model that supports tool use (for example Qwen 2.5 7B Instruct or Llama 3.1 8B Instruct) and load it.
+2. Open the **Developer** tab and turn on **Start server** (it runs at `http://localhost:1234`). Copy the model's identifier shown there.
+3. In the app, go to **Settings → AI models**:
+   - In Providers, tick **On** for `lmstudio`.
+   - In Model profiles, for **Local (Ollama)** and **Planner (local)**: set Provider to `lmstudio` and Model to the identifier you copied.
+   - Click **Save model settings**. The `lmstudio` row should show "ready".
+
+**Ollama**: run `ollama pull llama3.1:8b`; the default profiles already point at Ollama, so nothing else is needed (change the model name in Settings if you pulled a different one).
+
+Small local models follow the planning format less reliably than large hosted ones; the app rejects bad plans and retries, then has the Chief of Staff handle the request directly. To use Claude or OpenAI instead, add the key in **Settings → API keys** and pick the `claude` or `gpt` profile for your agents.
+
+### For developers
+
+- `pnpm dev:api` restarts the API on code changes; `pnpm dev:web` serves the dashboard with hot reload at http://localhost:5173.
+- To use PostgreSQL instead of the built-in database, set `DATABASE_URL` in `.env`.
+- Docker: `docker compose up --build` with `POSTGRES_PASSWORD` set (see below).
 
 ### Connecting email
 
@@ -46,14 +73,16 @@ An email is only ever sent after you approve that exact message in Approvals. Ea
 ### Docker
 
 ```bash
-cp .env.example .env   # fill in JWT_SECRET, MASTER_KEY
-POSTGRES_PASSWORD=$(openssl rand -hex 16) docker compose up --build
+pnpm install && node scripts/bootstrap.mjs   # creates .env (or copy .env.example and fill it in)
+POSTGRES_PASSWORD=choose-a-password docker compose up --build
 ```
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
+| `pnpm run bootstrap` | First-time setup: create `.env` with secret keys, build everything |
+| `pnpm start` | Run the app at http://localhost:8787 |
 | `pnpm test` | Core unit tests + API integration tests (in-process Postgres) |
 | `pnpm typecheck` | Type-check all packages |
 | `pnpm db:migrate` | Apply database migrations |

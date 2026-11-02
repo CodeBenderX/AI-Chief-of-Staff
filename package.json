@@ -2,10 +2,14 @@
   "name": "aicos",
   "private": true,
   "version": "0.1.0",
-  "description": "AI Company Operating System — a human CEO directing an AI workforce with backend-enforced controls",
+  "description": "AI Company Operating System \u2014 a human CEO directing an AI workforce with backend-enforced controls",
   "packageManager": "pnpm@10.28.0",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20.12"
+  },
   "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs && pnpm -r build",
+    "start": "pnpm --filter @aicos/api start",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

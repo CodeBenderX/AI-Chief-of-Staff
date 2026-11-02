@@ -1,3 +1,4 @@
+import { DEFAULT_DATABASE_URL, env } from "./env.js";
 import { seedAgents } from "@aicos/core";
 import { hashPassword } from "./auth.js";
 import { connect, migrate } from "./db.js";
@@ -5,7 +6,7 @@ import { PgStore } from "./pgStore.js";
 import { newId } from "@aicos/core";
 
 const [cmd] = process.argv.slice(2);
-const db = await connect(process.env.DATABASE_URL ?? "pglite:./data/pglite");
+const db = await connect(env("DATABASE_URL") ?? DEFAULT_DATABASE_URL);
 
 try {
   if (cmd === "migrate") {
@@ -14,8 +15,8 @@ try {
   } else if (cmd === "seed") {
     await migrate(db);
     await seedAgents(new PgStore(db));
-    const email = process.env.CEO_EMAIL;
-    const password = process.env.CEO_PASSWORD;
+    const email = env("CEO_EMAIL");
+    const password = env("CEO_PASSWORD");
     if (email && password) {
       if (password.length < 12) throw new Error("CEO_PASSWORD must be at least 12 characters");
       const r = await db.query(`INSERT INTO users (id, email, name, password_hash, role) SELECT $1,$2,$3,$4,'ceo' WHERE NOT EXISTS (SELECT 1 FROM users) RETURNING id`, [newId("usr"), email.toLowerCase(), "CEO", await hashPassword(password)]);
