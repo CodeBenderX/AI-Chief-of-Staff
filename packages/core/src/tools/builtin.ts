@@ -168,16 +168,16 @@ export const webFetchTool = defineTool({
 export const emailSendTool = defineTool({
   id: "email.send",
   name: "Send external email",
-  description: "Send an email to someone outside the company. Always requires CEO approval of the exact message before it is sent.",
+  description: "Send a plain-text email to someone outside the company. Always requires CEO approval of the exact message first. The result status is the real outcome: \"sent\", \"failed\" (see detail), or \"queued_no_connector\" if no email account is connected. Report it exactly; never say an email was sent unless status is \"sent\".",
   input: z.object({ to: z.email(), subject: z.string().min(1).max(300), body: z.string().min(1).max(50_000) }),
-  output: z.object({ id: z.string(), status: z.string() }),
+  output: z.object({ id: z.string(), status: z.string(), detail: z.string().optional() }),
   level: AutonomyLevel.External,
   risk: "medium",
   actions: ["external_communication"],
-  limits: { timeoutMs: 30_000, maxCallsPerTask: 3 },
+  limits: { timeoutMs: 60_000, maxCallsPerTask: 3 },
   async execute(ctx, input) {
     if (!ctx.services.outbox) throw new Error("no outbound connector configured");
-    return ctx.services.outbox.send({ channel: "email", to: input.to, subject: input.subject, body: input.body });
+    return ctx.services.outbox.send({ channel: "email", to: input.to, subject: input.subject, body: input.body }, { taskId: ctx.task.id, agentId: ctx.agent.id });
   },
 });
 

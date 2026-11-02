@@ -27,6 +27,15 @@ The CEO holds final authority. The rules below are enforced in code and in the d
 - Single use: execution consumes the approval with a compare-and-set in the database, so concurrent replays fail.
 - Pending approvals expire after 72 hours and are never treated as approval.
 
+## Email
+
+- Sending is reachable only through the `email.send` tool (Level 3, always needs an approval of the exact message) or by the CEO directly (test email to the CEO's own address; resending an already-approved message from the Outbox).
+- The SMTP password is stored as the encrypted secret `SMTP_PASSWORD` and read only at send time. TLS 1.2+ is required; unencrypted SMTP is refused unless the server is on the same machine (for local testing).
+- Recipient domain allowlist and a rolling 24-hour cap are checked before connecting to the mail server.
+- Messages are plain text. Recipients are validated as email addresses, and headers are built by nodemailer, so message content can't inject headers.
+- Resends use an atomic status change, so one approval can't produce two sends. Every configuration change, test and resend is audited.
+- The agent receives the real outcome (`sent`, `failed`, or `queued_no_connector`) and is instructed never to claim an email was sent otherwise.
+
 ## Prompt injection
 
 Tool output, web pages, other agents' results and stored memory are wrapped in `<untrusted_data>` / `<company_memory>` blocks marked as data. Text matching known injection patterns is flagged in the block and recorded in the audit log. This reduces the risk; the actual protection is that injected instructions can only lead to tool calls the policy engine already permits, and anything consequential still needs the CEO.

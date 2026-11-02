@@ -53,7 +53,7 @@ Every step appends to `task_events`, the complete execution history shown on eac
 
 ## Suggested milestone 2
 
-1. Outbound connectors behind the existing outbox (SMTP or Gmail, a CMS, GitHub PRs), so approved actions are actually delivered.
+1. ~~Email delivery~~ (done: SMTP connector behind the outbox). Next connectors: GitHub pull requests, a CMS for publishing, and reading inbound replies.
 2. GitHub integration and the Docker sandbox in CI for the engineering department.
 3. A real web search tool with source capture for market research, and scheduled research.
 4. pgvector embeddings for memory search.

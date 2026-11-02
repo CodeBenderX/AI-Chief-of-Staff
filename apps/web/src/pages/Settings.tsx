@@ -11,7 +11,17 @@ interface SettingsData {
   policies: { defaultAutonomyCap: number; monthlyBudgetUsd: number; limits: Record<string, number> };
   activeProviders: string[];
   canStoreSecrets: boolean;
+  email: EmailCfg;
+  emailNotReady: string | null;
 }
+interface EmailCfg { enabled: boolean; host: string; port: number; security: "tls" | "starttls" | "none"; username: string; fromAddress: string; fromName: string; allowedDomains: string[]; dailyLimit: number; bccCeo: boolean }
+
+const PRESETS: Record<string, Pick<EmailCfg, "host" | "port" | "security">> = {
+  "Gmail / Google Workspace": { host: "smtp.gmail.com", port: 587, security: "starttls" },
+  "Outlook / Microsoft 365": { host: "smtp.office365.com", port: 587, security: "starttls" },
+  Fastmail: { host: "smtp.fastmail.com", port: 465, security: "tls" },
+  "Zoho Mail": { host: "smtp.zoho.com", port: 465, security: "tls" },
+};
 interface Secret { name: string; source: string; hint: string | null }
 
 const LIMIT_LABELS: Record<string, string> = {
@@ -43,6 +53,7 @@ export function Settings() {
     <div className="stack">
       <PageHead title="Settings" sub={isCeo ? "Models, keys and the rules every agent works under." : "Only the CEO can change settings."} />
       <Models data={data} onSaved={reload} readOnly={!isCeo} />
+      <Email data={data} onSaved={reload} readOnly={!isCeo} />
       <Keys canStore={data.canStoreSecrets} readOnly={!isCeo} />
       <Policies data={data} readOnly={!isCeo} />
       <Company data={data} readOnly={!isCeo} />
@@ -204,6 +215,88 @@ function Company({ data, readOnly }: { data: SettingsData; readOnly: boolean }) 
         <div className="field"><label htmlFor="c-mis">Mission</label><textarea id="c-mis" value={c.mission} onChange={(e) => setC({ ...c, mission: e.target.value })} /></div>
         <div className="field"><label htmlFor="c-tz">Time zone</label><input id="c-tz" value={c.timezone} onChange={(e) => setC({ ...c, timezone: e.target.value })} /></div>
         {!readOnly && <button className="primary" onClick={() => s.run(() => api("/settings/company", { method: "PUT", body: c }), "Company profile saved.")}>Save profile</button>}
+      </fieldset>
+      {s.view}
+    </section>
+  );
+}
+
+function Email({ data, onSaved, readOnly }: { data: SettingsData; onSaved: () => void; readOnly: boolean }) {
+  const [e, setE] = useState<EmailCfg>(data.email);
+  const [password, setPassword] = useState("");
+  const [domains, setDomains] = useState(data.email.allowedDomains.join(", "));
+  const s = useSaver();
+  const set = <K extends keyof EmailCfg>(k: K, v: EmailCfg[K]) => setE({ ...e, [k]: v });
+  const save = () =>
+    s.run(async () => {
+      if (password) await api("/secrets/SMTP_PASSWORD", { method: "PUT", body: { value: password } });
+      await api("/settings/email", { method: "PUT", body: { ...e, allowedDomains: domains.split(/[\s,]+/).map((d) => d.trim().toLowerCase()).filter(Boolean) } });
+      setPassword("");
+      onSaved();
+    }, "Email settings saved.");
+  const test = () => s.run(async () => {
+    const r = await api<{ to: string }>("/settings/email/test", { method: "POST" });
+    return r;
+  }, "Test email sent. Check your inbox (and spam folder).");
+  const ready = !data.emailNotReady;
+  return (
+    <section className="panel">
+      <h2>Email</h2>
+      <p className="small muted">The account agents send from. Every email still needs your approval of the exact message first.</p>
+      <p className="small">
+        {ready ? <span className="pill completed">connected</span> : <span className="pill">not sending</span>}{" "}
+        {ready ? `Approved emails are sent from ${data.email.fromAddress}.` : `Approved emails are kept in the Outbox: ${data.emailNotReady}.`}
+      </p>
+      <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0 }}>
+        <div className="field">
+          <label htmlFor="em-preset">Provider</label>
+          <select id="em-preset" value="" onChange={(ev) => { const p = PRESETS[ev.target.value]; if (p) setE({ ...e, ...p }); }}>
+            <option value="">Fill in server details for…</option>
+            {Object.keys(PRESETS).map((k) => <option key={k}>{k}</option>)}
+          </select>
+        </div>
+        <div className="grid2">
+          <div className="field"><label htmlFor="em-host">SMTP server</label><input id="em-host" value={e.host} onChange={(ev) => set("host", ev.target.value.trim())} placeholder="smtp.example.com" /></div>
+          <div className="row" style={{ alignItems: "flex-start", flexWrap: "nowrap" }}>
+            <div className="field" style={{ width: 110 }}><label htmlFor="em-port">Port</label><input id="em-port" type="number" inputMode="numeric" value={e.port || ""} onChange={(ev) => set("port", Number(ev.target.value))} /></div>
+            <div className="field" style={{ flex: 1 }}>
+              <label htmlFor="em-sec">Encryption</label>
+              <select id="em-sec" value={e.security} onChange={(ev) => set("security", ev.target.value as EmailCfg["security"])}>
+                <option value="starttls">STARTTLS (usually port 587)</option><option value="tls">TLS (usually port 465)</option><option value="none">None (local test server only)</option>
+              </select>
+            </div>
+          </div>
+          <div className="field"><label htmlFor="em-user">Username</label><input id="em-user" autoComplete="off" value={e.username} onChange={(ev) => set("username", ev.target.value.trim())} placeholder="you@yourcompany.com" /></div>
+          <div className="field">
+            <label htmlFor="em-pass">Password</label>
+            <input id="em-pass" type="password" autoComplete="new-password" value={password} onChange={(ev) => setPassword(ev.target.value)} placeholder="Leave blank to keep the saved one" />
+            <span className="small muted">For Gmail, create an app password (Google Account → Security → App passwords). Stored encrypted.</span>
+          </div>
+          <div className="field"><label htmlFor="em-from">From address</label><input id="em-from" type="email" value={e.fromAddress} onChange={(ev) => set("fromAddress", ev.target.value.trim())} /></div>
+          <div className="field"><label htmlFor="em-name">From name</label><input id="em-name" value={e.fromName} onChange={(ev) => set("fromName", ev.target.value)} placeholder="Acme Sales" /></div>
+        </div>
+        <h3>Safeguards</h3>
+        <div className="grid2">
+          <div className="field">
+            <label htmlFor="em-dom">Only send to these domains</label>
+            <input id="em-dom" value={domains} onChange={(ev) => setDomains(ev.target.value)} placeholder="Any domain" />
+            <span className="small muted">Comma-separated, e.g. acme.com, partner.io. Subdomains are included.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="em-lim">Most emails per 24 hours</label>
+            <input id="em-lim" type="number" min={1} value={e.dailyLimit || ""} onChange={(ev) => set("dailyLimit", Number(ev.target.value))} />
+          </div>
+        </div>
+        <div className="checks" style={{ marginBottom: 14 }}>
+          <label><input type="checkbox" checked={e.bccCeo} onChange={(ev) => set("bccCeo", ev.target.checked)} />Blind-copy me on every email agents send</label>
+          <label><input type="checkbox" checked={e.enabled} onChange={(ev) => set("enabled", ev.target.checked)} />Send approved emails</label>
+        </div>
+        {!readOnly && (
+          <div className="row">
+            <button className="primary" onClick={save}>Save email settings</button>
+            <button onClick={test} disabled={!ready}>Send me a test email</button>
+          </div>
+        )}
       </fieldset>
       {s.view}
     </section>

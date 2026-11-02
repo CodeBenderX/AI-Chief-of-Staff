@@ -158,6 +158,19 @@ CREATE TABLE IF NOT EXISTS settings (
   },
 ];
 
+MIGRATIONS.push({
+  id: "002_outbox_delivery",
+  sql: `
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS detail TEXT;
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0;
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS provider_message_id TEXT;
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS task_id TEXT;
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS agent_id TEXT;
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS outbox_sent ON outbox(channel, status, sent_at);
+`,
+});
+
 export async function migrate(db: Db): Promise<string[]> {
   await db.query(`CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
   const done = new Set((await db.query<{ id: string }>(`SELECT id FROM schema_migrations`)).map((r) => r.id));

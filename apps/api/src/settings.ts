@@ -63,6 +63,34 @@ export const PoliciesSchema = z.object({
   monthlyBudgetUsd: z.number().min(0).max(1_000_000),
 });
 
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+/** SMTP account used to deliver approved emails. The password lives in the encrypted secret SMTP_PASSWORD. */
+export const EmailSchema = z
+  .object({
+    enabled: z.boolean(),
+    host: z.string().max(253),
+    port: z.number().int().min(1).max(65535),
+    /** tls = implicit TLS (465), starttls = upgrade (587). "none" is allowed only for a server on this machine. */
+    security: z.enum(["tls", "starttls", "none"]),
+    username: z.string().max(320),
+    fromAddress: z.union([z.email().max(320), z.literal("")]),
+    fromName: z.string().max(120),
+    /** Optional: only these recipient domains may receive email. Empty = any domain. */
+    allowedDomains: z.array(z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i).max(253)).max(100),
+    /** Hard cap on emails sent per rolling 24 hours. */
+    dailyLimit: z.number().int().min(1).max(10_000),
+    /** Send the CEO a blind copy of every email agents send. */
+    bccCeo: z.boolean(),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.enabled) return;
+    if (!v.host) ctx.addIssue({ code: "custom", message: "SMTP host is required" });
+    if (!v.fromAddress) ctx.addIssue({ code: "custom", message: "From address is required" });
+    if (v.security === "none" && !LOCAL_HOSTS.has(v.host)) ctx.addIssue({ code: "custom", message: "Unencrypted SMTP is only allowed for a server on this machine; use TLS or STARTTLS" });
+  });
+export type EmailSettings = z.infer<typeof EmailSchema>;
+
 export type Models = { providers: ProviderConfig[]; profiles: ModelProfile[] };
 export type CompanyProfile = z.infer<typeof CompanySchema>;
 export type Policies = z.infer<typeof PoliciesSchema>;
@@ -71,6 +99,7 @@ const DEFAULTS = {
   models: { providers: DEFAULT_PROVIDERS, profiles: DEFAULT_PROFILES } as Models,
   company: { name: "My AI Company", mission: "", industry: "", timezone: "America/Vancouver" } as CompanyProfile,
   policies: { defaultAutonomyCap: AutonomyLevel.External, limits: DEFAULT_LIMITS, monthlyBudgetUsd: 100 } as Policies,
+  email: { enabled: false, host: "", port: 587, security: "starttls", username: "", fromAddress: "", fromName: "", allowedDomains: [], dailyLimit: 50, bccCeo: false } as EmailSettings,
 };
 type Key = keyof typeof DEFAULTS;
 

@@ -23,7 +23,8 @@ import { migrate, type Db } from "./db.js";
 import { PgStore } from "./pgStore.js";
 import { SecretStore } from "./secrets.js";
 import { DbDocuments, DbOutbox } from "./services.js";
-import { CompanySchema, ModelsSchema, PoliciesSchema, Settings } from "./settings.js";
+import { CompanySchema, EmailSchema, ModelsSchema, PoliciesSchema, Settings } from "./settings.js";
+import { EmailConnector, EmailError, SMTP_PASSWORD_SECRET } from "./email.js";
 
 export interface AppConfig {
   db: Db;
@@ -48,7 +49,8 @@ export async function buildApp(cfg: AppConfig) {
   const store = new PgStore(db);
   const settings = new Settings(db);
   const secrets = new SecretStore(db, cfg.masterKey);
-  const outbox = new DbOutbox(db);
+  const email = new EmailConnector(settings, secrets, db);
+  const outbox = new DbOutbox(db, email);
   const documents = new DbDocuments(db);
   const company = createCompany({ store, services: { outbox, documents, sandbox: cfg.sandbox ?? new DisabledSandbox() } });
   await seedAgents(store);
@@ -72,7 +74,11 @@ export async function buildApp(cfg: AppConfig) {
     company.audit.write({ actorType: "user", actorId: user.id, action, target, outcome, detail });
 
   app.setErrorHandler((err, _req, reply) => {
-    if (err instanceof z.ZodError) return reply.code(400).send({ error: "validation failed", details: z.prettifyError(err) });
+    if (err instanceof z.ZodError) {
+      // Readable for people: "port: Too big: expected number to be <=65535"
+      const details = err.issues.map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message)).join("; ");
+      return reply.code(400).send({ error: "validation failed", details });
+    }
     const status = (err as { statusCode?: number }).statusCode ?? 500;
     if (status >= 500) app.log.error(err);
     return reply.code(status).send({ error: status >= 500 ? "internal error" : (err as Error).message });
@@ -382,6 +388,14 @@ export async function buildApp(cfg: AppConfig) {
 
   app.get("/api/outbox", can("read"), async () => outbox.list());
 
+  /** CEO-only: deliver an already-approved item that failed or was queued before email was set up. */
+  app.post("/api/outbox/:id/retry", can("approvals:decide"), async (req) => {
+    const { id } = req.params as { id: string };
+    const r = await outbox.retry(id);
+    await audit(me(req), "outbox.retry", id, { status: r.status, detail: r.detail });
+    return r;
+  });
+
   // ---------------- settings, secrets, audit ----------------
   app.get("/api/settings", can("read"), async () => ({
     models: await settings.get("models"),
@@ -389,6 +403,8 @@ export async function buildApp(cfg: AppConfig) {
     policies: await settings.get("policies"),
     activeProviders: company.router.availableProviders(),
     canStoreSecrets: secrets.canStore,
+    email: await settings.get("email"),
+    emailNotReady: await email.notReady(),
   }));
 
   app.put("/api/settings/models", can("settings:write"), async (req) => {
@@ -398,6 +414,28 @@ export async function buildApp(cfg: AppConfig) {
     await audit(me(req), "settings.models", null, { providers: v.providers.map((p) => p.id), profiles: v.profiles.map((p) => `${p.id}=${p.provider}/${p.model}`) });
     return { ok: true, activeProviders: company.router.availableProviders() };
   });
+  app.put("/api/settings/email", can("settings:write"), async (req) => {
+    const v = EmailSchema.parse(req.body);
+    await settings.set("email", v);
+    await audit(me(req), "settings.email", null, { enabled: v.enabled, host: v.host, port: v.port, security: v.security, fromAddress: v.fromAddress, allowedDomains: v.allowedDomains, dailyLimit: v.dailyLimit });
+    return { ok: true, notReady: await email.notReady() };
+  });
+
+  /** CEO-only: send a test message to the CEO's own address to check the SMTP setup. */
+  app.post("/api/settings/email/test", { ...can("settings:write"), config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
+    try {
+      const r = await email.send(
+        { to: me(req).email, subject: "Test email from your AI company", body: "Email delivery is working. Approved emails from your agents will be sent from this account." },
+        { skipPolicy: true },
+      );
+      await audit(me(req), "email.test", me(req).email, { ok: true });
+      return { ok: true, to: me(req).email, messageId: r.messageId };
+    } catch (e) {
+      await audit(me(req), "email.test", me(req).email, { ok: false, error: (e as Error).message }, "denied");
+      return reply.code(e instanceof EmailError ? 502 : 500).send({ error: (e as Error).message });
+    }
+  });
+
   app.put("/api/settings/company", can("settings:write"), async (req) => {
     const v = CompanySchema.parse(req.body);
     await settings.set("company", v);
@@ -413,7 +451,7 @@ export async function buildApp(cfg: AppConfig) {
 
   app.get("/api/secrets", can("read"), async () => {
     const m = await settings.get("models");
-    return secrets.list(m.providers.map((p) => p.apiKeySecret).filter((x): x is string => !!x));
+    return secrets.list([...m.providers.map((p) => p.apiKeySecret).filter((x): x is string => !!x), SMTP_PASSWORD_SECRET]);
   });
   app.put("/api/secrets/:name", can("secrets:write"), async (req) => {
     const { name } = req.params as { name: string };

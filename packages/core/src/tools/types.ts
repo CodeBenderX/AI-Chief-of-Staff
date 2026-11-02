@@ -22,7 +22,14 @@ export interface ToolServices {
 
 export interface Outbox {
   /** Queues an outbound message via the configured connector. */
-  send(msg: { channel: string; to: string; subject?: string; body: string }): Promise<{ id: string; status: string }>;
+  /**
+   * Called only after policy + CEO approval. Returns the real delivery outcome:
+   * "sent", "failed" (with detail), or "queued_no_connector".
+   */
+  send(
+    msg: { channel: string; to: string; subject?: string; body: string },
+    meta?: { taskId?: string; agentId?: string },
+  ): Promise<{ id: string; status: string; detail?: string }>;
 }
 
 export interface DocumentStore {
