@@ -175,6 +175,63 @@ CREATE INDEX IF NOT EXISTS outbox_sent ON outbox(channel, status, sent_at);
 `,
 });
 
+MIGRATIONS.push({
+  id: "003_leads",
+  sql: `
+CREATE TABLE IF NOT EXISTS lead_runs (
+  id TEXT PRIMARY KEY,
+  niche TEXT NOT NULL,
+  area TEXT NOT NULL,
+  requested INT NOT NULL,
+  status TEXT NOT NULL,
+  searches INT NOT NULL DEFAULT 0,
+  checked INT NOT NULL DEFAULT 0,
+  qualified INT NOT NULL DEFAULT 0,
+  skipped INT NOT NULL DEFAULT 0,
+  message TEXT,
+  started_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS leads (
+  id TEXT PRIMARY KEY,
+  domain TEXT UNIQUE NOT NULL,
+  business_name TEXT NOT NULL,
+  website TEXT NOT NULL,
+  niche TEXT,
+  area TEXT,
+  status TEXT NOT NULL,
+  score INT NOT NULL DEFAULT 0,
+  audit JSONB,
+  contact_email TEXT,
+  contact_source TEXT,
+  contact_found_at TIMESTAMPTZ,
+  notes TEXT NOT NULL DEFAULT '',
+  run_id TEXT,
+  draft_task_id TEXT,
+  contacted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS leads_status ON leads(status);
+CREATE INDEX IF NOT EXISTS leads_email ON leads(lower(contact_email));
+CREATE TABLE IF NOT EXISTS suppression (
+  value TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  reason TEXT,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS search_usage (
+  id BIGSERIAL PRIMARY KEY,
+  provider TEXT NOT NULL,
+  source TEXT NOT NULL,
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS search_usage_at ON search_usage(at);
+`,
+});
+
 export async function migrate(db: Db): Promise<string[]> {
   await db.query(`CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
   const done = new Set((await db.query<{ id: string }>(`SELECT id FROM schema_migrations`)).map((r) => r.id));

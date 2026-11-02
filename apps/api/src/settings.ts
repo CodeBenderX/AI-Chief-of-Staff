@@ -91,6 +91,31 @@ export const EmailSchema = z
   });
 export type EmailSettings = z.infer<typeof EmailSchema>;
 
+export const SearchSettingsSchema = z.object({
+  provider: z.enum(["none", "tavily", "brave", "searxng"]),
+  /** Only for SearXNG (self-hosted), e.g. http://localhost:8080 */
+  searxngUrl: z.union([z.url(), z.literal("")]),
+  /** Two-letter country code to focus results (Brave only), e.g. CA. */
+  country: z.union([z.string().regex(/^[A-Za-z]{2}$/), z.literal("")]),
+  /** Stop searching after this many searches per calendar month (keeps you inside free allowances). */
+  monthlyLimit: z.number().int().min(1).max(100_000),
+});
+export type SearchSettings = z.infer<typeof SearchSettingsSchema>;
+
+/** Identification and opt-out text added to every outreach email (anti-spam laws such as CASL require both). */
+export const OutreachSchema = z.object({
+  senderName: z.string().max(100),
+  businessName: z.string().max(120),
+  /** How to reach you: website, phone and/or mailing address. */
+  contactLine: z.string().max(300),
+  optOutText: z.string().min(10).max(300),
+  /** What you offer, in a sentence or two. Used to personalize outreach. */
+  pitch: z.string().max(1000),
+  /** Website check score at or above which a business counts as a good lead. */
+  minScore: z.number().int().min(1).max(30),
+});
+export type OutreachSettings = z.infer<typeof OutreachSchema>;
+
 export type Models = { providers: ProviderConfig[]; profiles: ModelProfile[] };
 export type CompanyProfile = z.infer<typeof CompanySchema>;
 export type Policies = z.infer<typeof PoliciesSchema>;
@@ -99,6 +124,13 @@ const DEFAULTS = {
   models: { providers: DEFAULT_PROVIDERS, profiles: DEFAULT_PROFILES } as Models,
   company: { name: "My AI Company", mission: "", industry: "", timezone: "America/Vancouver" } as CompanyProfile,
   policies: { defaultAutonomyCap: AutonomyLevel.External, limits: DEFAULT_LIMITS, monthlyBudgetUsd: 100 } as Policies,
+  search: { provider: "none", searxngUrl: "", country: "", monthlyLimit: 900 } as SearchSettings,
+  outreach: {
+    senderName: "", businessName: "", contactLine: "",
+    optOutText: "If you'd rather not hear from me, just reply \"no thanks\" and I won't contact you again.",
+    pitch: "", minScore: 4,
+  } as OutreachSettings,
+  agentMigrations: [] as string[],
   email: { enabled: false, host: "", port: 587, security: "starttls", username: "", fromAddress: "", fromName: "", allowedDomains: [], dailyLimit: 50, bccCeo: false } as EmailSettings,
 };
 type Key = keyof typeof DEFAULTS;
@@ -107,7 +139,11 @@ export class Settings {
   constructor(private db: Db) {}
   async get<K extends Key>(key: K): Promise<(typeof DEFAULTS)[K]> {
     const row = (await this.db.query<{ value: (typeof DEFAULTS)[K] }>(`SELECT value FROM settings WHERE key=$1`, [key]))[0];
-    return row?.value ?? structuredClone(DEFAULTS[key]);
+    const def = structuredClone(DEFAULTS[key]);
+    if (!row) return def;
+    // Fill in fields added in later versions so older saved settings keep working.
+    const isObj = (v: unknown) => !!v && typeof v === "object" && !Array.isArray(v);
+    return (isObj(def) && isObj(row.value) ? { ...def, ...row.value } : row.value) as (typeof DEFAULTS)[K];
   }
   async set<K extends Key>(key: K, value: (typeof DEFAULTS)[K]) {
     await this.db.query(`INSERT INTO settings (key, value) VALUES ($1,$2::jsonb) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [key, JSON.stringify(value)]);

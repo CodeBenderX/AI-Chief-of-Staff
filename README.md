@@ -57,6 +57,18 @@ Small local models follow the planning format less reliably than large hosted on
 - To use PostgreSQL instead of the built-in database, set `DATABASE_URL` in `.env`.
 - Docker: `docker compose up --build` with `POSTGRES_PASSWORD` set (see below).
 
+### Finding clients (Leads)
+
+The **Leads** page finds local businesses whose websites need work, checks each site, and helps you reach out.
+
+1. **Choose a search service** in **Settings → Web search**. Tavily's free plan (1,000 searches a month, no credit card) is plenty: a lead search uses about 2–5. Sign up at tavily.com, paste the API key, save, and click **Run a test search**. Brave Search and self-hosted SearXNG also work. Set **Most searches per month** below your plan's free allowance and the app stops before you'd be charged.
+2. **Fill in Settings → Outreach**: your name, business name, how to reach you, and what you offer. These become the footer on every outreach email, with an opt-out sentence. Anti-spam laws (Canada's CASL, the US CAN-SPAM Act) require identifying yourself and offering a way to opt out, so outreach emails without the footer are refused.
+3. On **Leads**, enter a type of business and an area (e.g. "plumbers", "Burnaby, BC") and click **Find leads**. It skips directories like Yelp and Facebook, checks each website (HTTPS, mobile-friendly, outdated, broken links, slow, search basics) and keeps the ones with real problems, along with any contact email the business publishes on its own site and the page it was found on.
+4. Open a lead and click **Draft outreach email**. The Sales agent writes a short, personalized email that mentions only problems the check actually found. You review the exact message in **Approvals**; nothing is sent until you approve it. Once sent, the lead is marked **Contacted**.
+5. If anyone asks not to be contacted, click **Do not contact** on the lead (or add them in Settings → Outreach). They are never emailed again, even if an email was already approved.
+
+Not legal advice: you're responsible for following the anti-spam rules where you and your recipients are. In Canada, emailing an address a business publishes on its website is generally allowed only when the message relates to their business and the site doesn't say they don't want unsolicited messages.
+
 ### Connecting email
 
 Approved emails are delivered over SMTP from an account you choose. Until you connect one, they wait in the **Outbox** marked "not sent", and you can send them later with one click.
@@ -100,7 +112,7 @@ docs/           ARCHITECTURE.md, SECURITY.md
 
 ## What works today
 
-Verified by the test suite (42 tests) and by running the full stack against PostgreSQL 16.
+Verified by the test suite (61 tests) and by running the full stack against PostgreSQL 16.
 
 - **Orchestration.** The Chief of Staff turns an objective into a dependency graph of department subtasks; plans are validated (known agents, no cycles, size limits). Independent work runs in parallel, dependent work waits for inputs, results are synthesized into a report to the CEO. Retries, escalation, cancellation, and recovery after restart.
 - **Execution limits on every task tree:** delegation depth, subtask count, model calls, tool calls, steps per task, tokens, spend, wall-clock time, identical-call loop guard, repeated-failure guard. Recursive delegation and dependency deadlocks are refused.
@@ -109,6 +121,7 @@ Verified by the test suite (42 tests) and by running the full stack against Post
 - **Model layer:** Anthropic and OpenAI via official SDKs, any OpenAI-compatible server (Ollama, LM Studio, vLLM), offline mock. Per-agent model profiles, fallback chains, retry with backoff, per-provider rate limits, context trimming, token and cost tracking, monthly budget.
 - **Company memory:** seven scopes, versioning, provenance on every entry, CEO-verified vs. agent claims, conflict detection (agents cannot overwrite verified facts), archive/delete, per-agent access control, full-text search. Agents retrieve relevant memory before each task.
 - **Security:** argon2id passwords, httpOnly session cookies, RBAC (CEO / admin / viewer), AES-256-GCM secret storage, credential redaction in logs, append-only audit log enforced by a database trigger, rate limiting, input validation on every endpoint, SSRF protection on web fetches, untrusted-content fencing with prompt-injection detection.
+- **Lead finding.** Web search (Tavily, Brave or SearXNG) with a monthly cap, directory filtering, an automatic website check with evidence for each problem, published-contact extraction with the source page, personalized outreach drafts that must carry an identification and opt-out footer, and a do-not-contact list enforced before approval and again at send time. Tested with fake search results, fake websites and a real SMTP server.
 - **Email delivery (SMTP).** Approved emails are sent from your account, with a recipient domain allowlist, a daily cap, optional BCC to the CEO, a test-email button, delivery status and message IDs in the Outbox, and CEO-only resend of failed or queued messages. Tested against a real SMTP server.
 - **Dashboard** covering all six areas of the spec plus the Outbox, with live updates.
 
@@ -118,7 +131,7 @@ These are honest gaps, not hidden ones:
 
 - **Publishing and deploy connectors.** Approved posts and deploys are recorded in the Outbox as "not sent"; no CMS or CI/CD connector exists yet. Email is connected (above). Inbound email (reading replies) is not built.
 - **Code sandbox** is off by default. `SANDBOX=docker` runs code in locked-down containers (no network, read-only, capped CPU/memory); it is implemented but was not exercised in CI because the build environment had no Docker daemon.
-- **Integrations** (GitHub, calendar, project management, cloud, monitoring, security scanning) and a real **web search** tool. `web.fetch` reads public pages only.
+- **Integrations** (GitHub, calendar, project management, cloud, monitoring, security scanning).
 - **Semantic (vector) search** for memory; search is Postgres full-text today.
 - **Scheduled research**, conversation memory for a CEO chat thread, user management UI beyond the API, MFA, and automated backup scheduling.
 - The dashboard has no automated UI tests yet.

@@ -98,6 +98,15 @@ export class ToolExecutor {
       return { status: "error", error };
     }
 
+    const services = { ...this.services, ...params.services };
+    if (services.preflight) {
+      const refusal = await services.preflight({ toolId, input: parsed.data, agentId: agent.id, taskId: task.id });
+      if (refusal) {
+        await this.audit.write({ actorType: "agent", actorId: agent.id, action: `tool.${toolId}`, target: task.id, outcome: "denied", detail: { reason: refusal, preflight: true } });
+        return { status: "denied", reason: refusal };
+      }
+    }
+
     if (decision.kind === "requires_approval") {
       if (!params.approvalId) {
         const approval = await this.approvals.request({
@@ -124,7 +133,7 @@ export class ToolExecutor {
 
     try {
       const raw = await withTimeout(
-        tool.execute({ agent, task, signal: params.signal, services: { ...this.services, ...params.services } }, parsed.data),
+        tool.execute({ agent, task, signal: params.signal, services }, parsed.data),
         tool.limits.timeoutMs,
         `tool ${toolId}`,
       );

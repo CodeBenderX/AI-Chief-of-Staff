@@ -25,7 +25,11 @@ export interface OutboxRow {
  * The status returned is always the real outcome — never an optimistic one.
  */
 export class DbOutbox implements Outbox {
-  constructor(private db: Db, private email?: EmailConnector) {}
+  constructor(
+    private db: Db,
+    private email?: EmailConnector,
+    private hooks: { isSuppressed?: (to: string) => Promise<boolean>; onSent?: (to: string) => Promise<void> } = {},
+  ) {}
 
   async send(msg: { channel: string; to: string; subject?: string; body: string }, meta: { taskId?: string; agentId?: string } = {}) {
     const id = newId("out");
@@ -40,6 +44,8 @@ export class DbOutbox implements Outbox {
   private async deliver(id: string): Promise<{ id: string; status: string; detail?: string }> {
     const row = (await this.db.query<OutboxRow>(`SELECT * FROM outbox WHERE id=$1`, [id]))[0]!;
     if (row.channel !== "email" || !this.email) return this.mark(id, "queued_no_connector", `no delivery connector for ${row.channel}`);
+    // Checked again at send time: someone may have opted out since the email was approved.
+    if (await this.hooks.isSuppressed?.(row.recipient)) return this.mark(id, "failed", "not sent: recipient is on the do-not-contact list");
     const notReady = await this.email.notReady();
     if (notReady) return this.mark(id, "queued_no_connector", `not sent: ${notReady}`);
     try {
@@ -47,6 +53,7 @@ export class DbOutbox implements Outbox {
       const bcc = cfg.bccCeo ? (await this.db.query<{ email: string }>(`SELECT email FROM users WHERE role='ceo' AND active ORDER BY created_at LIMIT 1`))[0]?.email : undefined;
       const r = await this.email.send({ to: row.recipient, subject: row.subject ?? "", body: row.body, bcc });
       await this.db.query(`UPDATE outbox SET status='sent', detail=NULL, provider_message_id=$2, sent_at=now(), attempts=attempts+1 WHERE id=$1`, [id, r.messageId]);
+      await this.hooks.onSent?.(row.recipient).catch(() => {});
       return { id, status: "sent", detail: `delivered to the mail server for ${row.recipient}` };
     } catch (e) {
       const err = e as EmailError;

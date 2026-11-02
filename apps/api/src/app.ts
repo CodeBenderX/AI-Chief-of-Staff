@@ -23,8 +23,9 @@ import { migrate, type Db } from "./db.js";
 import { PgStore } from "./pgStore.js";
 import { SecretStore } from "./secrets.js";
 import { DbDocuments, DbOutbox } from "./services.js";
-import { CompanySchema, EmailSchema, ModelsSchema, PoliciesSchema, Settings } from "./settings.js";
+import { CompanySchema, EmailSchema, ModelsSchema, OutreachSchema, PoliciesSchema, SearchSettingsSchema, Settings } from "./settings.js";
 import { EmailConnector, EmailError, SMTP_PASSWORD_SECRET } from "./email.js";
+import { BRAVE_SECRET, LEAD_STATUSES, LeadService, TAVILY_SECRET } from "./leads.js";
 
 export interface AppConfig {
   db: Db;
@@ -50,10 +51,47 @@ export async function buildApp(cfg: AppConfig) {
   const settings = new Settings(db);
   const secrets = new SecretStore(db, cfg.masterKey);
   const email = new EmailConnector(settings, secrets, db);
-  const outbox = new DbOutbox(db, email);
+  // LeadService needs the company and the company's tools need LeadService, so tools reach it lazily.
+  let leads!: LeadService;
+  const outbox = new DbOutbox(db, email, { isSuppressed: (to) => leads.isSuppressed(to), onSent: (to) => leads.markContacted(to) });
   const documents = new DbDocuments(db);
-  const company = createCompany({ store, services: { outbox, documents, sandbox: cfg.sandbox ?? new DisabledSandbox() } });
+  const company = createCompany({
+    store,
+    services: {
+      outbox,
+      documents,
+      sandbox: cfg.sandbox ?? new DisabledSandbox(),
+      search: { id: "configured", search: (q, o) => leads.search(q, "agent", o?.count ?? 8, o?.signal) },
+      preflight: (r) => leads.preflight(r),
+    },
+  });
+  leads = new LeadService(db, settings, secrets, company);
   await seedAgents(store);
+  await applyAgentToolMigrations();
+
+  /**
+   * New default tools for the built-in agents in existing installs. Only adds
+   * read-only tools, once, and records it in the audit log.
+   */
+  async function applyAgentToolMigrations() {
+    const MIGRATIONS: Record<string, Record<string, string[]>> = {
+      "2026-11-prospecting": { "market-research": ["web.search", "site.audit"], sales: ["web.search", "site.audit"], marketing: ["web.search"] },
+    };
+    const done = await settings.get("agentMigrations");
+    for (const [name, grants] of Object.entries(MIGRATIONS)) {
+      if (done.includes(name)) continue;
+      for (const [agentId, tools] of Object.entries(grants)) {
+        const a = await store.getAgent(agentId);
+        if (!a) continue;
+        const add = tools.filter((t) => !a.tools.includes(t));
+        if (!add.length) continue;
+        await store.upsertAgent({ ...a, tools: [...a.tools, ...add] });
+        await company.audit.write({ actorType: "system", actorId: "update", action: "agent.permissions_change", target: agentId, outcome: "ok", detail: { added: add, reason: `app update ${name} (read-only tools)` } });
+      }
+      done.push(name);
+      await settings.set("agentMigrations", done);
+    }
+  }
 
   const reloadModels = async () => {
     const m = await settings.get("models");
@@ -451,7 +489,7 @@ export async function buildApp(cfg: AppConfig) {
 
   app.get("/api/secrets", can("read"), async () => {
     const m = await settings.get("models");
-    return secrets.list([...m.providers.map((p) => p.apiKeySecret).filter((x): x is string => !!x), SMTP_PASSWORD_SECRET]);
+    return secrets.list([...m.providers.map((p) => p.apiKeySecret).filter((x): x is string => !!x), SMTP_PASSWORD_SECRET, TAVILY_SECRET, BRAVE_SECRET]);
   });
   app.put("/api/secrets/:name", can("secrets:write"), async (req) => {
     const { name } = req.params as { name: string };
@@ -471,6 +509,79 @@ export async function buildApp(cfg: AppConfig) {
 
   app.get("/api/audit", can("read"), async (req) => store.listAudit({ limit: Math.min(Number((req.query as { limit?: string }).limit ?? 200), 1000) }));
 
+  // ---------------- web search & outreach settings ----------------
+  app.get("/api/settings/search", can("read"), async () => ({ ...(await settings.get("search")), status: await leads.searchStatus() }));
+  app.put("/api/settings/search", can("settings:write"), async (req) => {
+    const v = SearchSettingsSchema.parse(req.body);
+    await settings.set("search", v);
+    await audit(me(req), "settings.search", null, v);
+    return { ok: true, status: await leads.searchStatus() };
+  });
+  app.post("/api/settings/search/test", { ...can("settings:write"), config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
+    const { query } = z.object({ query: z.string().min(2).max(200) }).parse(req.body ?? { query: "web design" });
+    try {
+      const results = await leads.search(query, "test", 5);
+      return { ok: true, results };
+    } catch (e) {
+      return reply.code(502).send({ error: (e as Error).message });
+    }
+  });
+  app.get("/api/settings/outreach", can("read"), async () => ({ ...(await settings.get("outreach")), notReady: await leads.outreachReady() }));
+  app.put("/api/settings/outreach", can("settings:write"), async (req) => {
+    const v = OutreachSchema.parse(req.body);
+    await settings.set("outreach", v);
+    await audit(me(req), "settings.outreach", null, { businessName: v.businessName, minScore: v.minScore });
+    return { ok: true, notReady: await leads.outreachReady() };
+  });
+
+  // ---------------- leads ----------------
+  app.get("/api/leads", can("read"), async (req) => {
+    const q = z.object({ status: z.enum([...LEAD_STATUSES, "all"]).optional(), q: z.string().max(100).optional() }).parse(req.query);
+    if (q.status === "all") return db.query(`SELECT * FROM leads ORDER BY created_at DESC LIMIT 500`);
+    return leads.list({ status: q.status, q: q.q });
+  });
+  app.get("/api/leads/:id", can("read"), async (req) => leads.get((req.params as { id: string }).id));
+  app.patch("/api/leads/:id", can("tasks:write"), async (req) => {
+    const body = z.object({ status: z.enum(LEAD_STATUSES).optional(), notes: z.string().max(5000).optional(), contactEmail: z.union([z.email().max(320), z.literal(""), z.null()]).optional() }).parse(req.body);
+    const r = await leads.update((req.params as { id: string }).id, body, me(req).id);
+    await audit(me(req), "lead.update", r.id, { status: body.status, contactEmailChanged: body.contactEmail !== undefined });
+    return r;
+  });
+  app.post("/api/leads/:id/draft", can("tasks:write"), async (req) => {
+    const r = await leads.draft((req.params as { id: string }).id, me(req).id);
+    await audit(me(req), "lead.draft", (req.params as { id: string }).id, r);
+    return r;
+  });
+  app.post("/api/leads/:id/do-not-contact", can("tasks:write"), async (req) => {
+    await leads.doNotContact((req.params as { id: string }).id, me(req).id);
+    await audit(me(req), "lead.do_not_contact", (req.params as { id: string }).id);
+    return { ok: true };
+  });
+  app.get("/api/lead-runs", can("read"), async () => leads.listRuns());
+  app.post("/api/lead-runs", can("tasks:write"), async (req) => {
+    const body = z.object({ niche: z.string().min(2).max(100), area: z.string().min(2).max(100), count: z.number().int().min(1).max(25) }).parse(req.body);
+    const r = await leads.startRun(body, me(req).id);
+    await audit(me(req), "lead_run.start", r.id, body);
+    return r;
+  });
+  app.get("/api/do-not-contact", can("read"), async () => leads.listSuppression());
+  app.post("/api/do-not-contact", can("tasks:write"), async (req) => {
+    const body = z.object({ value: z.string().min(3).max(320), reason: z.string().max(300).optional() }).parse(req.body);
+    const v = body.value.trim().toLowerCase();
+    const kind = v.includes("@") ? "email" : "domain";
+    if (kind === "email" ? !z.email().safeParse(v).success : !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(v)) throw Object.assign(new Error("enter an email address or a domain like example.com"), { statusCode: 400 });
+    await leads.suppress(v, kind, body.reason ?? "added manually", me(req).id);
+    await audit(me(req), "do_not_contact.add", v);
+    return { ok: true };
+  });
+  /** Removing someone from the list is the CEO's call. */
+  app.delete("/api/do-not-contact/:value", can("approvals:decide"), async (req) => {
+    const v = decodeURIComponent((req.params as { value: string }).value);
+    await leads.unsuppress(v);
+    await audit(me(req), "do_not_contact.remove", v);
+    return { ok: true };
+  });
+
   // ---------------- live events (SSE) ----------------
   app.get("/api/events/stream", can("read"), async (req, reply) => {
     reply.raw.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -479,11 +590,14 @@ export async function buildApp(cfg: AppConfig) {
     const onApproval = (a: { id: string }) => send("approval", { id: a.id });
     company.orchestrator.events.on("event", onEvent);
     company.orchestrator.events.on("approval", onApproval);
+    const onLead = (x: unknown) => send("lead", x);
+    leads.events.on("change", onLead);
     const ping = setInterval(() => reply.raw.write(": ping\n\n"), 25_000);
     req.raw.on("close", () => {
       clearInterval(ping);
       company.orchestrator.events.off("event", onEvent);
       company.orchestrator.events.off("approval", onApproval);
+      leads.events.off("change", onLead);
     });
     send("hello", { ok: true });
     return reply;
@@ -499,5 +613,5 @@ export async function buildApp(cfg: AppConfig) {
     app.get("/", (_req, reply) => reply.sendFile("index.html"));
   }
 
-  return { app: app as FastifyInstance, company, store, settings, secrets, outbox, documents };
+  return { app: app as FastifyInstance, leads, company, store, settings, secrets, outbox, documents };
 }

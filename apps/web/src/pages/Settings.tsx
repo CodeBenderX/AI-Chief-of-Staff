@@ -53,6 +53,8 @@ export function Settings() {
     <div className="stack">
       <PageHead title="Settings" sub={isCeo ? "Models, keys and the rules every agent works under." : "Only the CEO can change settings."} />
       <Models data={data} onSaved={reload} readOnly={!isCeo} />
+      <WebSearch readOnly={!isCeo} />
+      <Outreach readOnly={!isCeo} />
       <Email data={data} onSaved={reload} readOnly={!isCeo} />
       <Keys canStore={data.canStoreSecrets} readOnly={!isCeo} />
       <Policies data={data} readOnly={!isCeo} />
@@ -300,6 +302,140 @@ function Email({ data, onSaved, readOnly }: { data: SettingsData; onSaved: () =>
         )}
       </fieldset>
       {s.view}
+    </section>
+  );
+}
+
+interface SearchCfg { provider: "none" | "tavily" | "brave" | "searxng"; searxngUrl: string; country: string; monthlyLimit: number; status: { ready: boolean; reason: string | null; used: number; limit: number } }
+
+function WebSearch({ readOnly }: { readOnly: boolean }) {
+  const { data, reload } = useApi<SearchCfg>("/settings/search");
+  const [c, setC] = useState<SearchCfg | null>(null);
+  const [key, setKey] = useState("");
+  const [results, setResults] = useState<{ title: string; url: string }[] | null>(null);
+  const s = useSaver();
+  useEffect(() => { if (data) setC(data); }, [data]);
+  if (!c) return null;
+  const secret = c.provider === "tavily" ? "TAVILY_API_KEY" : c.provider === "brave" ? "BRAVE_API_KEY" : null;
+  const save = () => s.run(async () => {
+    if (key && secret) await api(`/secrets/${secret}`, { method: "PUT", body: { value: key } });
+    await api("/settings/search", { method: "PUT", body: { provider: c.provider, searxngUrl: c.searxngUrl, country: c.country, monthlyLimit: c.monthlyLimit } });
+    setKey("");
+    reload();
+  }, "Web search settings saved.");
+  const test = () => s.run(async () => {
+    const r = await api<{ results: { title: string; url: string }[] }>("/settings/search/test", { body: { query: "web design services" } });
+    setResults(r.results);
+  }, "Search works.");
+  return (
+    <section className="panel">
+      <h2>Web search</h2>
+      <p className="small muted">Used to find leads and by research agents. Each search counts toward your monthly limit below.</p>
+      <p className="small">
+        {data!.status.ready ? <span className="pill completed">ready</span> : <span className="pill">not set up</span>}{" "}
+        {data!.status.ready ? `${data!.status.used} of ${data!.status.limit} searches used this month.` : `Not searching: ${data!.status.reason}.`}
+      </p>
+      <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0 }}>
+        <div className="field">
+          <label htmlFor="ws-provider">Search service</label>
+          <select id="ws-provider" value={c.provider} onChange={(e) => setC({ ...c, provider: e.target.value as SearchCfg["provider"] })}>
+            <option value="none">None</option>
+            <option value="tavily">Tavily (free plan: 1,000 searches a month, no credit card)</option>
+            <option value="brave">Brave Search API</option>
+            <option value="searxng">SearXNG (self-hosted, free)</option>
+          </select>
+        </div>
+        {secret && (
+          <div className="field">
+            <label htmlFor="ws-key">API key</label>
+            <input id="ws-key" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste to add or replace; leave blank to keep the saved one" />
+            <span className="small muted">{c.provider === "tavily" ? "Sign up at tavily.com and copy your API key from the dashboard." : "Create a key in the Brave Search API dashboard. Check its current pricing first."} Stored encrypted.</span>
+          </div>
+        )}
+        {c.provider === "searxng" && (
+          <div className="field">
+            <label htmlFor="ws-url">SearXNG address</label>
+            <input id="ws-url" value={c.searxngUrl} onChange={(e) => setC({ ...c, searxngUrl: e.target.value.trim() })} placeholder="http://localhost:8080" />
+            <span className="small muted">JSON output must be enabled in its settings.yml (search → formats → json).</span>
+          </div>
+        )}
+        <div className="grid2">
+          <div className="field">
+            <label htmlFor="ws-limit">Most searches per month</label>
+            <input id="ws-limit" type="number" min={1} value={c.monthlyLimit || ""} onChange={(e) => setC({ ...c, monthlyLimit: Number(e.target.value) })} />
+            <span className="small muted">Keep this under your plan's free allowance so you're never charged.</span>
+          </div>
+          {c.provider === "brave" && (
+            <div className="field"><label htmlFor="ws-country">Country (2 letters)</label><input id="ws-country" maxLength={2} value={c.country} onChange={(e) => setC({ ...c, country: e.target.value.toUpperCase() })} placeholder="CA" /></div>
+          )}
+        </div>
+        {!readOnly && (
+          <div className="row">
+            <button className="primary" onClick={save}>Save web search</button>
+            <button onClick={test} disabled={!data!.status.ready}>Run a test search</button>
+          </div>
+        )}
+      </fieldset>
+      {s.view}
+      {results && <ul className="small" style={{ marginTop: 8 }}>{results.map((r) => <li key={r.url}>{r.title} <span className="muted">{r.url}</span></li>)}</ul>}
+    </section>
+  );
+}
+
+interface OutreachCfg { senderName: string; businessName: string; contactLine: string; optOutText: string; pitch: string; minScore: number; notReady: string | null }
+
+function Outreach({ readOnly }: { readOnly: boolean }) {
+  const { data, reload } = useApi<OutreachCfg>("/settings/outreach");
+  const dnc = useApi<{ value: string; kind: string; reason: string | null; created_at: string }[]>("/do-not-contact");
+  const [o, setO] = useState<OutreachCfg | null>(null);
+  const [add, setAdd] = useState("");
+  const s = useSaver();
+  useEffect(() => { if (data) setO(data); }, [data]);
+  if (!o) return null;
+  const set = <K extends keyof OutreachCfg>(k: K, v: OutreachCfg[K]) => setO({ ...o, [k]: v });
+  const footer = [o.senderName, o.businessName, o.contactLine].filter((x) => x.trim()).join("\n") + `\n\n${o.optOutText}`;
+  return (
+    <section className="panel">
+      <h2>Outreach</h2>
+      <p className="small muted">Used when agents draft emails to leads. Every outreach email ends with your details and a way to opt out; anti-spam laws such as Canada's CASL require both, and emails without them are refused.</p>
+      <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0 }}>
+        <div className="grid2">
+          <div className="field"><label htmlFor="o-name">Your name</label><input id="o-name" value={o.senderName} onChange={(e) => set("senderName", e.target.value)} /></div>
+          <div className="field"><label htmlFor="o-biz">Business name</label><input id="o-biz" value={o.businessName} onChange={(e) => set("businessName", e.target.value)} /></div>
+        </div>
+        <div className="field"><label htmlFor="o-contact">How to reach you</label><input id="o-contact" value={o.contactLine} onChange={(e) => set("contactLine", e.target.value)} placeholder="Website, phone and/or mailing address" /></div>
+        <div className="field"><label htmlFor="o-pitch">What you offer</label><textarea id="o-pitch" value={o.pitch} onChange={(e) => set("pitch", e.target.value)} placeholder="e.g. I build fast, mobile-friendly websites for local service businesses, and keep them updated for a flat monthly fee." /></div>
+        <div className="field"><label htmlFor="o-opt">Opt-out sentence</label><input id="o-opt" value={o.optOutText} onChange={(e) => set("optOutText", e.target.value)} /></div>
+        <div className="field" style={{ maxWidth: 260 }}>
+          <label htmlFor="o-score">Minimum website score to count as a lead</label>
+          <input id="o-score" type="number" min={1} max={30} value={o.minScore || ""} onChange={(e) => set("minScore", Number(e.target.value))} />
+          <span className="small muted">Higher means only sites with bigger problems. 4 is a good start.</span>
+        </div>
+        <label>Footer added to every outreach email</label>
+        <pre style={{ fontFamily: "var(--font)", marginBottom: 12 }}>{footer}</pre>
+        {!readOnly && <button className="primary" onClick={() => s.run(async () => { await api("/settings/outreach", { method: "PUT", body: { senderName: o.senderName, businessName: o.businessName, contactLine: o.contactLine, optOutText: o.optOutText, pitch: o.pitch, minScore: o.minScore } }); reload(); }, "Outreach settings saved.")}>Save outreach</button>}
+      </fieldset>
+      {s.view}
+
+      <h3 style={{ marginTop: 20 }}>Do-not-contact list</h3>
+      <p className="small muted">Nobody here is ever emailed, even if an email was already approved. Add anyone who asks not to be contacted.</p>
+      <div className="row" style={{ marginBottom: 10 }}>
+        <input aria-label="Email or domain to block" value={add} onChange={(e) => setAdd(e.target.value)} placeholder="name@business.com or business.com" style={{ maxWidth: 320 }} />
+        <button disabled={add.trim().length < 3} onClick={() => s.run(async () => { await api("/do-not-contact", { body: { value: add.trim() } }); setAdd(""); dnc.reload(); }, "Added to do-not-contact list.")}>Add</button>
+      </div>
+      {dnc.data?.length ? (
+        <table>
+          <thead><tr><th>Email or domain</th><th>Reason</th><th>Added</th><th /></tr></thead>
+          <tbody>
+            {dnc.data.map((d) => (
+              <tr key={d.value}>
+                <td>{d.value}</td><td className="small">{d.reason}</td><td className="small muted">{new Date(d.created_at).toLocaleDateString()}</td>
+                <td>{!readOnly && <button className="link" onClick={() => confirm(`Remove ${d.value} from the do-not-contact list?`) && s.run(async () => { await api(`/do-not-contact/${encodeURIComponent(d.value)}`, { method: "DELETE" }); dnc.reload(); }, "Removed.")}>Remove</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : <p className="small muted">Empty.</p>}
     </section>
   );
 }
