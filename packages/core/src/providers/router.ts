@@ -56,12 +56,14 @@ export function costUsd(p: ModelProfile, inputTokens: number, outputTokens: numb
 /**
  * Keep a conversation inside the context window: always keep the first user
  * message (the assignment) and as many recent turns as fit. Assistant tool calls
- * and their tool results are dropped together so pairs never break.
+ * and their tool results are dropped together so pairs never break. If the
+ * assignment alone is still too big, its middle is cut, keeping the start
+ * (instructions) and the end (closing guidance).
  */
 export function fitContext(system: string, messages: ChatMessage[], budgetTokens: number): ChatMessage[] {
   const cost = (m: ChatMessage) => estimateTokens(m.content + JSON.stringify(m.toolCalls ?? []));
   let total = estimateTokens(system) + messages.reduce((s, m) => s + cost(m), 0);
-  if (total <= budgetTokens || messages.length <= 2) return messages;
+  if (total <= budgetTokens || !messages.length) return messages;
   const [first, ...rest] = messages;
   // Group into units that start at a non-tool message.
   const groups: ChatMessage[][] = [];
@@ -75,10 +77,22 @@ export function fitContext(system: string, messages: ChatMessage[], budgetTokens
     total -= g.reduce((s, m) => s + cost(m), 0);
     dropped += g.length;
   }
-  const notice: ChatMessage = { role: "user", content: `[${dropped} earlier messages were trimmed to fit the context window]` };
+  let head = first!.content + (dropped ? `\n\n[${dropped} earlier messages were trimmed to fit the context window]` : "");
+  const over = total - budgetTokens;
+  if (over > 0) {
+    const keepChars = Math.max(800, (estimateTokens(head) - over) * 4);
+    if (keepChars < head.length) {
+      const half = Math.floor(keepChars / 2);
+      head = `${head.slice(0, half)}\n\n[... ${head.length - keepChars} characters cut to fit the model's context window ...]\n\n${head.slice(-half)}`;
+    }
+  }
   // Groups always start with a non-tool message, so no tool result is orphaned.
-  return [{ ...first!, content: `${first!.content}\n\n${notice.content}` }, ...groups.flat()];
+  return [{ ...first!, content: head }, ...groups.flat()];
 }
+
+/** Servers phrase this differently: LM Studio, llama.cpp, OpenAI, Anthropic, Ollama. */
+export const isContextOverflow = (msg: string) =>
+  /context (size|length|window)[^.]{0,40}(exceed|too|limit)|exceed\w*[^.]{0,40}context|maximum context length|prompt is too long|too many tokens|n_ctx/i.test(msg);
 
 export class ModelRouter {
   private providers = new Map<string, ModelProvider>();
@@ -163,8 +177,12 @@ export class ModelRouter {
     for (const profile of chain) {
       const provider = this.providers.get(profile.provider)!;
       const maxOut = Math.min(req.maxOutputTokens ?? profile.maxOutputTokens, profile.maxOutputTokens);
-      const messages = fitContext(req.system, req.messages, profile.contextWindow - maxOut - 1024);
       const tools = profile.capabilities.includes("tools") ? req.tools : undefined;
+      // Room for the reply and the tool definitions; the rest is the prompt budget.
+      const toolTokens = estimateTokens(JSON.stringify(tools ?? []));
+      let budget = Math.max(1000, profile.contextWindow - maxOut - toolTokens - 512);
+      let messages = fitContext(req.system, req.messages, budget);
+      let shrinks = 0;
       for (let attempt = 1; attempt <= this.maxAttemptsPerProfile; attempt++) {
         await this.limiters.get(profile.provider)!.acquire(req.signal);
         const started = Date.now();
@@ -177,6 +195,16 @@ export class ModelRouter {
           lastErr = classifyError(e);
           await this.usageSink?.({ provider: profile.provider, model: profile.model, profile: profile.id, inputTokens: 0, outputTokens: 0, costUsd: 0, latencyMs: Date.now() - started, ok: false, meta, error: lastErr.message });
           if (lastErr.message === "aborted") throw lastErr;
+          // The server's real context is smaller than configured (e.g. LM Studio loaded
+          // the model with a short context): shrink the prompt and try again.
+          if (isContextOverflow(lastErr.message) && shrinks < 3) {
+            const used = estimateTokens(req.system) + messages.reduce((n, m) => n + estimateTokens(m.content + JSON.stringify(m.toolCalls ?? [])), 0);
+            budget = Math.max(1000, Math.floor(Math.min(budget, used) * 0.6));
+            messages = fitContext(req.system, req.messages, budget);
+            shrinks++;
+            attempt--; // a shrink isn't a failed attempt
+            continue;
+          }
           if (!lastErr.retryable) break; // try the next profile
           if (attempt < this.maxAttemptsPerProfile) await sleep(this.baseBackoffMs * 2 ** (attempt - 1) + Math.random() * 100, req.signal);
         }

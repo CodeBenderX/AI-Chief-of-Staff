@@ -94,13 +94,14 @@ function Models({ data, onSaved, readOnly }: { data: SettingsData; onSaved: () =
         <h3 style={{ marginTop: 16 }}>Model profiles</h3>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>$ in / out per 1M tokens</th><th>Falls back to</th></tr></thead>
+            <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>Context (tokens)</th><th>$ in / out per 1M tokens</th><th>Falls back to</th></tr></thead>
             <tbody>
               {m.profiles.map((p, i) => (
                 <tr key={p.id}>
                   <td><b>{p.label}</b><div className="small muted">{p.id}</div></td>
                   <td><select aria-label={`${p.id} provider`} value={p.provider} onChange={(e) => setProf(i, { provider: e.target.value })}>{m.providers.map((x) => <option key={x.id}>{x.id}</option>)}</select></td>
                   <td><input aria-label={`${p.id} model`} value={p.model} onChange={(e) => setProf(i, { model: e.target.value })} /></td>
+                  <td style={{ width: 110 }}><input aria-label={`${p.id} context window`} type="number" min={1000} step={1024} value={p.contextWindow || ""} onChange={(e) => setProf(i, { contextWindow: Number(e.target.value) })} /></td>
                   <td>
                     <div className="row" style={{ flexWrap: "nowrap", gap: 4 }}>
                       <input aria-label={`${p.id} input price`} type="number" step="0.01" style={{ width: 80 }} value={p.inputCostPerMTok} onChange={(e) => setProf(i, { inputCostPerMTok: Number(e.target.value) })} />
@@ -113,7 +114,7 @@ function Models({ data, onSaved, readOnly }: { data: SettingsData; onSaved: () =
             </tbody>
           </table>
         </div>
-        <p className="small muted">Prices are estimates for cost tracking. Check them against your provider's current price list.</p>
+        <p className="small muted">Context must not be larger than what the model was loaded with. For LM Studio, use the Context Length from the model's Load settings. Prices are estimates for cost tracking; check them against your provider's current price list.</p>
         {!readOnly && <button className="primary" onClick={() => s.run(async () => { await api("/settings/models", { method: "PUT", body: m }); onSaved(); }, "Model settings saved and reloaded.")}>Save model settings</button>}
       </fieldset>
       {s.view}

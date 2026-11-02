@@ -35,8 +35,7 @@ const PlanSchema = z.object({
         dependsOn: z.array(z.string()).default([]),
         priority: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
       }),
-    )
-    .min(1),
+    ),
 });
 export type Plan = z.infer<typeof PlanSchema>;
 /** The plan's shape as JSON Schema, sent to models that support structured output. */
@@ -285,7 +284,7 @@ export class Orchestrator {
         if (plan) {
           await this.materializePlan(root, plan);
         } else {
-          // No usable plan: the Chief of Staff handles the objective directly.
+          // Simple objective (empty plan) or no usable plan: the Chief of Staff answers directly.
           root = (await this.d.store.getTask(rootId))!;
           await this.runWithRetries(root);
           return;
@@ -402,7 +401,21 @@ export class Orchestrator {
     let messages: ChatMessage[] = [
       {
         role: "user",
-        content: `PLAN_REQUEST\nDecompose the CEO objective into department subtasks.\n<objective>\n${root.instructions}\n</objective>\n\nAvailable departments:\n${roster}\n\n${memory}\n\nRules: at most ${root.limits.maxSubtasks} subtasks; use dependsOn (keys) only when a subtask truly needs another's output, so independent work runs in parallel; only use agent ids listed above; keep instructions specific and self-contained.\nReply with ONLY a JSON object: {"summary": string, "subtasks": [{"key": string, "agentId": string, "title": string, "instructions": string, "dependsOn": string[], "priority": "low"|"normal"|"high"|"urgent"}]}`,
+        content: [
+          "PLAN_REQUEST",
+          "Decide how to handle the CEO objective below, then reply with a plan.",
+          `<objective>\n${root.instructions}\n</objective>`,
+          `Available departments:\n${roster}`,
+          memory,
+          "How to plan:",
+          "- Use the FEWEST departments that can do the job well. Most objectives need 1 to 3 subtasks. Only large, multi-part projects need more.",
+          "- If you can answer the objective yourself without any department's tools or expertise (a short list, an explanation, a quick recommendation), return an empty subtasks list and you will answer it directly.",
+          "- Do not add departments just because they exist. Each subtask must produce something the CEO asked for or that another subtask truly needs.",
+          "- Use dependsOn (keys) only when a subtask needs another's output, so independent work runs in parallel.",
+          `- Only use the agent ids listed above. Never more than ${root.limits.maxSubtasks} subtasks.`,
+          "- Keep each subtask's instructions specific, self-contained and short.",
+          'Reply with ONLY a JSON object: {"summary": string, "subtasks": [{"key": string, "agentId": string, "title": string, "instructions": string, "dependsOn": string[], "priority": "low"|"normal"|"high"|"urgent"}]}',
+        ].join("\n\n"),
       },
     ];
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -413,6 +426,10 @@ export class Orchestrator {
         const plan = parsed.data;
         const errors = validatePlan(plan, agents, root.limits);
         if (!errors.length) {
+          if (!plan.subtasks.length) {
+            await this.event(root, "plan.direct", { summary: plan.summary });
+            return null; // the Chief of Staff answers directly
+          }
           await this.event(root, "plan.created", { summary: plan.summary, subtasks: plan.subtasks.map((s) => ({ key: s.key, agentId: s.agentId, title: s.title, dependsOn: s.dependsOn })) });
           return plan;
         }
