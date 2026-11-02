@@ -1,4 +1,10 @@
-import { StrictMode, createContext, useContext, useEffect, useState } from "react";
+import {
+  StrictMode,
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import { api, startLiveEvents, useApi, type User } from "./api";
@@ -22,7 +28,9 @@ function AuthGate() {
     api<{ user: User }>("/auth/me")
       .then((r) => setUser(r.user))
       .catch(async () => {
-        setNeedsSetup((await api<{ needsSetup: boolean }>("/auth/status")).needsSetup);
+        setNeedsSetup(
+          (await api<{ needsSetup: boolean }>("/auth/status")).needsSetup,
+        );
         setUser(null);
       });
   }, []);
@@ -35,13 +43,22 @@ function AuthGate() {
   );
 }
 
-function SignIn({ setup, onDone }: { setup: boolean; onDone: (u: User) => void }) {
+function SignIn({
+  setup,
+  onDone,
+}: {
+  setup: boolean;
+  onDone: (u: User) => void;
+}) {
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const r = await api<{ user: User }>(setup ? "/auth/setup" : "/auth/login", { body: form });
+      const r = await api<{ user: User }>(
+        setup ? "/auth/setup" : "/auth/login",
+        { body: form },
+      );
       onDone(r.user);
     } catch (err) {
       setError((err as Error).message);
@@ -51,18 +68,56 @@ function SignIn({ setup, onDone }: { setup: boolean; onDone: (u: User) => void }
     <div className="auth-page">
       <form className="panel" onSubmit={submit}>
         <h1>{setup ? "Create the CEO account" : "Sign in"}</h1>
-        <p className="muted">{setup ? "This first account holds final authority: approvals, permissions, keys and policies." : "Company console"}</p>
+        <p className="muted">
+          {setup
+            ? "This first account holds final authority: approvals, permissions, keys and policies."
+            : "Company console"}
+        </p>
         {setup && (
-          <div className="field"><label htmlFor="n">Your name</label><input id="n" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+          <div className="field">
+            <label htmlFor="n">Your name</label>
+            <input
+              id="n"
+              required
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </div>
         )}
-        <div className="field"><label htmlFor="e">Email</label><input id="e" type="email" required autoComplete="username" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+        <div className="field">
+          <label htmlFor="e">Email</label>
+          <input
+            id="e"
+            type="email"
+            required
+            autoComplete="username"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+          />
+        </div>
         <div className="field">
           <label htmlFor="p">Password</label>
-          <input id="p" type="password" required minLength={setup ? 12 : 1} autoComplete={setup ? "new-password" : "current-password"} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-          {setup && <span className="small muted">At least 12 characters.</span>}
+          <input
+            id="p"
+            type="password"
+            required
+            minLength={setup ? 12 : 1}
+            autoComplete={setup ? "new-password" : "current-password"}
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+          {setup && (
+            <span className="small muted">At least 12 characters.</span>
+          )}
         </div>
-        {error && <div className="err" style={{ marginBottom: 12 }}>{error}</div>}
-        <button className="primary" type="submit">{setup ? "Create account" : "Sign in"}</button>
+        {error && (
+          <div className="err" style={{ marginBottom: 12 }}>
+            {error}
+          </div>
+        )}
+        <button className="primary" type="submit">
+          {setup ? "Create account" : "Sign in"}
+        </button>
       </form>
     </div>
   );
@@ -79,9 +134,18 @@ function Shell({ onSignOut }: { onSignOut: () => void }) {
   return (
     <div className="shell">
       <nav className="nav" aria-label="Main">
-        <div className="brand">Company Console<small>AI workforce, human authority</small></div>
-        <NavLink to="/" end>Overview</NavLink>
-        <NavLink to="/approvals">Approvals {pending && pending.length > 0 && <span className="count">{pending.length}</span>}</NavLink>
+        <div className="brand">
+          Company Agent<small>AI workforce, human authority</small>
+        </div>
+        <NavLink to="/" end>
+          Overview
+        </NavLink>
+        <NavLink to="/approvals">
+          Approvals{" "}
+          {pending && pending.length > 0 && (
+            <span className="count">{pending.length}</span>
+          )}
+        </NavLink>
         <NavLink to="/tasks">Tasks</NavLink>
         <NavLink to="/outbox">Outbox</NavLink>
         <NavLink to="/workforce">Workforce</NavLink>
@@ -91,8 +155,16 @@ function Shell({ onSignOut }: { onSignOut: () => void }) {
         <div className="spacer" />
         <div className="who">
           <div style={{ color: "#fff" }}>{user.name}</div>
-          <div>{user.role === "ceo" ? "CEO" : user.role === "admin" ? "Administrator" : "Viewer"}</div>
-          <button className="link" onClick={signOut}>Sign out</button>
+          <div>
+            {user.role === "ceo"
+              ? "CEO"
+              : user.role === "admin"
+                ? "Administrator"
+                : "Viewer"}
+          </div>
+          <button className="link" onClick={signOut}>
+            Sign out
+          </button>
         </div>
       </nav>
       <main>
