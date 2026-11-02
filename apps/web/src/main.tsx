@@ -16,6 +16,7 @@ import { Knowledge } from "./pages/Knowledge";
 import { Settings } from "./pages/Settings";
 import { Audit } from "./pages/Audit";
 import { Outbox } from "./pages/Outbox";
+import { Leads } from "./pages/Leads";
 import "./styles.css";
 
 const UserCtx = createContext<User | null>(null);
@@ -146,6 +147,7 @@ function Shell({ onSignOut }: { onSignOut: () => void }) {
             <span className="count">{pending.length}</span>
           )}
         </NavLink>
+        <NavLink to="/leads">Leads</NavLink>
         <NavLink to="/tasks">Tasks</NavLink>
         <NavLink to="/outbox">Outbox</NavLink>
         <NavLink to="/workforce">Workforce</NavLink>
@@ -177,6 +179,7 @@ function Shell({ onSignOut }: { onSignOut: () => void }) {
           <Route path="/knowledge" element={<Knowledge />} />
           <Route path="/audit" element={<Audit />} />
           <Route path="/outbox" element={<Outbox />} />
+          <Route path="/leads" element={<Leads />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

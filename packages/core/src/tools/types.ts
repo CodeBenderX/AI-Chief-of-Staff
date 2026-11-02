@@ -18,6 +18,12 @@ export interface ToolServices {
   outbox?: Outbox;
   documents?: DocumentStore;
   fetch?: typeof fetch;
+  search?: import("../search.js").SearchProvider;
+  /**
+   * Host-defined checks before an action is executed or sent for approval
+   * (e.g. outreach compliance, do-not-contact list). Return a reason to refuse.
+   */
+  preflight?: (req: { toolId: string; input: unknown; agentId: string; taskId: string }) => Promise<string | null>;
 }
 
 export interface Outbox {

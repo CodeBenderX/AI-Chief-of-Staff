@@ -46,7 +46,7 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
     responsibilities: ["Competitor research", "Industry and trend analysis", "Pricing analysis", "Demand and opportunity assessment"],
     capabilities: ["research", "analysis", "sourcing"],
     maxAutonomy: AutonomyLevel.Draft,
-    tools: ["memory.search", "memory.write", "web.fetch", "document.create"],
+    tools: ["memory.search", "memory.write", "web.search", "web.fetch", "site.audit", "document.create"],
     memoryAccess: { read: STANDARD_READ, write: read("company", "task") },
   }),
   agent({
@@ -106,7 +106,7 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
     responsibilities: ["Messaging", "Campaign plans", "Content drafts"],
     capabilities: ["copywriting", "campaign_planning"],
     maxAutonomy: AutonomyLevel.External,
-    tools: ["memory.search", "memory.write", "document.create", "web.fetch", "content.publish"],
+    tools: ["memory.search", "memory.write", "document.create", "web.search", "web.fetch", "content.publish"],
     memoryAccess: { read: STANDARD_READ, write: read("project", "task") },
   }),
   agent({
@@ -114,11 +114,11 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
     name: "Sales Director",
     department: "Sales",
     role: "Pipeline strategy, outreach drafts, proposals",
-    focus: "You plan pipeline, qualify leads and draft outreach and proposals. Sending any email requires CEO approval through email.send.",
-    responsibilities: ["Lead qualification", "Outreach drafts", "Proposals"],
-    capabilities: ["sales_strategy", "proposal_writing"],
+    focus: "You find and qualify prospects, and write short, honest, personalized outreach and proposals. Only mention website problems that a site check actually found. Sending any email requires CEO approval through email.send.",
+    responsibilities: ["Lead research and qualification", "Personalized outreach drafts", "Proposals"],
+    capabilities: ["sales_strategy", "prospecting", "proposal_writing"],
     maxAutonomy: AutonomyLevel.External,
-    tools: ["memory.search", "memory.write", "document.create", "email.send"],
+    tools: ["memory.search", "memory.write", "document.create", "web.search", "site.audit", "email.send"],
     memoryAccess: { read: STANDARD_READ, write: read("project", "task") },
   }),
   agent({

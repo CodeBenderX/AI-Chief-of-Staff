@@ -55,6 +55,7 @@ export function startLiveEvents() {
   };
   es.addEventListener("task", bump);
   es.addEventListener("approval", bump);
+  es.addEventListener("lead", bump);
   return () => es.close();
 }
 
